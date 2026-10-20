@@ -12,7 +12,7 @@ mudar de estado). O plano completo está em `00-plano-geral.md`.
 | 2 | [CSV](fase-02-csv.md) | concluída | 2026-10-20 | 2026-10-20 | `25025d2` |
 | 3 | [Editor de tabela](fase-03-editor-tabela.md) | concluída | 2026-10-20 | 2026-10-20 | `9fdf618` |
 | 4 | [Editores de código](fase-04-editores-codigo.md) | concluída | 2026-10-20 | 2026-10-20 | `9d39873` |
-| 5 | [Administração](fase-05-administracao.md) | pendente | — | — | — |
+| 5 | [Administração](fase-05-administracao.md) | concluída | 2026-10-20 | 2026-10-20 | `bec0f65` |
 | 6 | [Extração/comparador](fase-06-extracao-comparador.md) | pendente | — | — | — |
 | 7 | [Assistente do editor](fase-07-assistente-editor.md) | pendente | — | — | — |
 | 8 | [Usuários/grants](fase-08-usuarios-grants.md) | pendente | — | — | — |
@@ -193,8 +193,31 @@ feito. Se algo ficar para depois, registrar como pendência da fase seguinte.
     divisão automática de scripts).
 
 ### Fase 5 — Administração
-- Status: pendente
-- Observações: —
+- Status: concluída (2026-10-20, commit `bec0f65`)
+- Entregue:
+  - `src/core/ibtools.pas`: `FindFirebirdTool` (PATH e diretórios do
+    Firebird), `ToolConnectionString`, `BuildBackupArgs`,
+    `BuildRestoreArgs`, `BuildValidateArgs`, `BuildStatsArgs` e `RunTool`
+    (executa com a saída em log; usuário e senha vão por `ISC_USER`/
+    `ISC_PASSWORD`, nunca na linha de comando).
+  - `src/ui/uAdmin.pas`: diálogo com as quatro tarefas (backup, restore,
+    validação e estatísticas), opções e painel de log.
+  - `src/ui/uMain.pas`: menu *Serviços > Backup…/Restaurar…/Validação…/
+    Estatísticas…*.
+- Testes: `tc_tools.pas` (5 casos, núcleo = 83), bloco `ferramentas
+  administrativas` no `testfb.lpr` (backup, restore em um banco novo e
+  validação com `gfix`) e no `uismoke.lpr` (o diálogo é criado com a
+  sessão).
+- Verificação: `make check`, `make test` (83/83), `make testfb` e `make
+  uismoke` verdes.
+- Observações/desvios:
+  - O `gstat` não está instalado neste ambiente: o diálogo avisa quando a
+    ferramenta não é encontrada.
+  - As ferramentas escrevem no fluxo de erro; a leitura usa
+    `poStderrToOutPut`.
+  - O `gbak` 3.0 usa o arquivo de backup como argumento posicional (sem
+    `-f`) e a opção `-rep` para restaurar sobre um banco existente.
+  - Sem botão *Cancelar* durante a execução (o processo roda até o fim).
 
 ### Fase 6 — Extração e comparador
 - Status: pendente
