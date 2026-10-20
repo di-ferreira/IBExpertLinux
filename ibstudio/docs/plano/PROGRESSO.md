@@ -7,7 +7,7 @@ mudar de estado). O plano completo está em `00-plano-geral.md`.
 
 | Fase | Spec | Status | Início | Conclusão | Commit |
 |---|---|---|---|---|---|
-| 0 | [Fundação](fase-00-fundacao.md) | pendente | — | — | — |
+| 0 | [Fundação](fase-00-fundacao.md) | concluída | 2026-10-20 | 2026-10-20 | `8ae1f06` |
 | 1 | [Edição de dados](fase-01-edicao-dados.md) | pendente | — | — | — |
 | 2 | [CSV](fase-02-csv.md) | pendente | — | — | — |
 | 3 | [Editor de tabela](fase-03-editor-tabela.md) | pendente | — | — | — |
@@ -36,8 +36,30 @@ feito. Se algo ficar para depois, registrar como pendência da fase seguinte.
 ## Registro
 
 ### Fase 0 — Fundação
-- Status: pendente
-- Observações: —
+- Status: concluída (2026-10-20, commit `8ae1f06`)
+- Entregue:
+  - `src/core/ibsettings.pas`: `TStudioSettings` (INI sem LCL, mesmas chaves
+    `[ultima]` do app anterior, senha nunca gravada, `LastDirectory` para as
+    fases seguintes). `uMain` passou a usar o serviço; a leitura direta do INI
+    saiu da interface.
+  - `src/core/ibsession.pas`: `ExecuteParams` (parâmetros nomeados), `Execute`
+    na sessão da UI, `Commit`/`Rollback` explícitos e as propriedades
+    `Connection`/`Transaction` para leitura.
+  - `src/core/ibtypes.pas`: `TConnectionProfile.CopyFrom` (atualiza o perfil
+    das configurações ao conectar).
+  - `src/ui/uSqlPreview.pas`: diálogo modal de prévia de SQL (realce
+    Firebird, modo somente leitura e modo confirmação) + menu
+    *Ferramentas > Prévia de SQL…*.
+  - `src/ui/uSqlTab.pas`: propriedade `SqlText` (texto do editor da aba).
+- Testes: `tc_settings.pas` (4 casos, total do núcleo = 40), bloco
+  `execucao parametrizada` no `testfb.lpr` (insert/commit/rollback/delete) e
+  conferência da prévia no `uismoke.lpr`.
+- Verificação: `make check`, `make test` (40/40), `make testfb` e `make
+  uismoke` verdes; `make app` compila.
+- Observações: sem desvio do escopo. O `word wrap` não existe em
+  `TSynEdit` nesta versão do Lazarus e a variável local `SQLText` do
+  autocompletar foi renomeada para `Contexto` (conflito com a nova
+  propriedade `SqlText`).
 
 ### Fase 1 — Edição de dados
 - Status: pendente
