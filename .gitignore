@@ -1,0 +1,9 @@
+# binário original analisado (não redistribuir)
+IBExpert.exe
+
+# recursos RCDATA extraídos (reproduzíveis por recon/dfm_extract.py)
+recon/resources/
+
+# sobras de execução local
+*.log
+__pycache__/

@@ -1,0 +1,34 @@
+object FileNameEditFrame: TFileNameEditFrame
+  Left = 0
+  Top = 0
+  Width = 201
+  Height = 21
+  HelpContext = 12100
+  AutoSize = True
+  TabOrder = 0
+  object FE: TdxButtonEdit
+    Left = 0
+    Top = 0
+    Width = 201
+    TabOrder = 0
+    StyleController = IBEMainForm.MainSC
+    OnChange = FEChange
+    Buttons = <
+      item
+        Default = True
+        Glyph.Data = {3e020000424d3e0200000000000036000000280000000d0000000d00000001001800000000000802000000000000000000000000000000000000ff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ff00000000000000000000000000000000000000000000000000000000000000ff00ffff00ffff00ff00000000000000408080408080408080408080408080408080408080408080000000ff00ffff00ff0000000080ffff000000408080408080408080408080408080408080408080408080000000ff00ff0000000080ffff80ffff0000004080804080804080804080804080804080804080804080800000000000000080ffff80ffff80ffff0000000000000000000000000000000000000000000000000000000000000080ffff80ffff80ffff80ffff80ffff80ffff80ffff80ffff000000ff00ffff00ffff00ff0000000080ffff80ffff80ffff000000000000000000000000000000000000ff00ffff00ffff00ff00ff00ff000000000000000000ff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ff00ff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ff000000000000000000ff00ff00ff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ff000000000000ff00ff00ff00ffff00ffff00ffff00ffff00ff000000ff00ffff00ffff00ff000000ff00ff000000ff00ff00ff00ffff00ffff00ffff00ffff00ffff00ff000000000000000000ff00ffff00ffff00ffff00ff00}
+        Kind = bkGlyph
+        Width = 21
+      end
+    >
+    OnButtonClick = FEButtonClick
+    ExistButtons = True
+  end
+  object SD: TSaveDialog
+    Left = 24
+  end
+  object od: TOpenDialog
+    Left = 57
+    Top = 1
+  end
+end
