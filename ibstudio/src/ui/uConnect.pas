@@ -66,7 +66,7 @@ var
     Result.Caption := ACaption;
     Result.Left := 12;
     Result.Top := Y + 4;
-    Result.Width := 90;
+    Result.Width := 94;
   end;
 
   function AddEdit: TEdit;
@@ -99,8 +99,9 @@ begin
   FEdPort.Width := 80;
   FEdPort.Anchors := [akLeft, akTop];
 
-  AddLabel('Banco (caminho/alias)');
+  AddLabel('Banco');
   FEdDatabase := AddEdit;
+  FEdDatabase.TextHint := 'caminho ou alias no servidor';
 
   AddLabel('Usuario');
   FEdUser := AddEdit;
@@ -123,15 +124,24 @@ begin
   FCbCharset.ItemIndex := 0;
   Inc(Y, RowH);
 
-  AddLabel('Dialeto');
   FCbDialect := TComboBox.Create(Self);
   FCbDialect.Parent := Self;
-  FCbDialect.Left := 240;
+  FCbDialect.Left := 300;
   FCbDialect.Top := Y - RowH;
   FCbDialect.Width := 60;
   FCbDialect.Items.Add('1');
   FCbDialect.Items.Add('3');
   FCbDialect.ItemIndex := 1;
+
+  { Rotulo do dialeto na mesma linha do combo. }
+  with TLabel.Create(Self) do
+  begin
+    Parent := Self;
+    Caption := 'Dialeto';
+    Left := 240;
+    Top := Y - RowH + 4;
+    Width := 56;
+  end;
 
   FLblStatus := TLabel.Create(Self);
   FLblStatus.Parent := Self;
