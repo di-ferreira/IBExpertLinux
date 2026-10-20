@@ -3,7 +3,20 @@
 Este diretório contém o binário original `IBExpert.exe` (IBExpert IDE 2013.2.20.1,
 Delphi 5), a análise técnica feita sobre ele e os artefatos de reconstrução.
 
-## Rodar agora
+## IBStudio — reimplementação livre (novo)
+
+Além da análise, o diretório traz **`ibstudio/`**: uma reimplementação do núcleo
+do IBExpert escrita do zero em Free Pascal/Lazarus, multiplataforma (Linux e
+Windows), com conexão Firebird, Database Explorer e editor SQL com execução em
+thread. Veja [`ibstudio/README.md`](ibstudio/README.md).
+
+```bash
+cd ibstudio
+make app && ./ibstudio     # requer fpc 3.2.2 + Lazarus 2.2 + libfbclient
+make test                  # 24 testes do núcleo, sem banco
+```
+
+## Rodar o binário original
 
 ### Linux (via Wine) — validado nesta máquina
 

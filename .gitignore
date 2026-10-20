@@ -7,3 +7,14 @@ recon/resources/
 # sobras de execução local
 *.log
 __pycache__/
+
+# artefatos de build do IBStudio (FPC/Lazarus)
+ibstudio/ibstudio
+ibstudio/lib/
+ibstudio/tests/lib/
+ibstudio/tests/testcore
+ibstudio/tests/uismoke
+*.ppu
+*.o
+*.compiled
+*.lps
