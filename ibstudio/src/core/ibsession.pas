@@ -430,7 +430,7 @@ var
   Q: TSQLQuery;
   SQL: string;
 begin
-  SQL := ListSQLFor(ANode.Kind);
+  SQL := ListSQLFor(ANode.FolderKind);
   if SQL = '' then
     Exit;
   ANode.ClearChildren;
@@ -442,7 +442,7 @@ begin
     Q.Open;
     while not Q.EOF do
     begin
-      ANode.AddChild(ANode.Kind, Trim(Q.Fields[0].AsString),
+      ANode.AddChild(ANode.FolderKind, Trim(Q.Fields[0].AsString),
         Trim(Q.Fields[1].AsString));
       Q.Next;
     end;

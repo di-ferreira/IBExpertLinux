@@ -375,7 +375,8 @@ begin
     Specs := FolderSpecs;
     for I := 0 to High(Specs) do
     begin
-      FolderMeta := TMetadataNode.Create(Specs[I].Kind, Specs[I].Title, '');
+      FolderMeta := TMetadataNode.Create(mkFolder, Specs[I].Title, '');
+      FolderMeta.FolderKind := Specs[I].Kind;
       MetaRoot.Children.Add(FolderMeta);
     end;
 
@@ -421,7 +422,9 @@ begin
     else
       Child := FTree.Items.AddChild(ATreeItem, M.Name);
     Child.Data := M;
-    Child.HasChildren := M.Kind in [mkTable, mkView, mkProcedure];
+    { Pastas sempre podem ser abertas; tabelas/views/procedures ganham o
+      triangulo porque tem filhos sob demanda. }
+    Child.HasChildren := M.Kind in [mkFolder, mkTable, mkView, mkProcedure];
   end;
 end;
 
@@ -473,6 +476,8 @@ begin
     Exit;
   Meta := TMetadataNode(Node.Data);
   case Meta.Kind of
+    mkFolder:
+      Node.Expand(False);
     mkTable, mkView:
       NewSqlTab(Format('select first 100 * from %s', [Meta.Name]));
   end;

@@ -73,6 +73,7 @@ type
     FChildren: specialize TObjectList<TMetadataNode>;
     FLoaded: Boolean;
     FIsLeaf: Boolean;
+    FFolderKind: TMetadataKind;
   public
     constructor Create(AKind: TMetadataKind; const AName, ADetail: string);
     destructor Destroy; override;
@@ -84,6 +85,8 @@ type
     property Children: specialize TObjectList<TMetadataNode> read FChildren;
     property Loaded: Boolean read FLoaded write FLoaded;
     property IsLeaf: Boolean read FIsLeaf write FIsLeaf;
+    { Para nos de pasta: o tipo dos objetos que ela lista. }
+    property FolderKind: TMetadataKind read FFolderKind write FFolderKind;
   end;
 
   { Resultado de uma execucao. }
@@ -155,8 +158,15 @@ begin
 end;
 
 function TConnectionProfile.DisplayName: string;
+var
+  Sep: string;
 begin
-  Result := Format('%s:%d/%s', [FHost, FPort, FDatabase]);
+  { Caminho absoluto no Unix ja comeca com '/': nao repetir o separador. }
+  if (FDatabase <> '') and (FDatabase[1] in ['/', '\']) then
+    Sep := ''
+  else
+    Sep := '/';
+  Result := Format('%s:%d%s%s', [FHost, FPort, Sep, FDatabase]);
 end;
 
 { TMetadataNode }
@@ -165,6 +175,9 @@ constructor TMetadataNode.Create(AKind: TMetadataKind; const AName, ADetail: str
 begin
   inherited Create;
   FKind := AKind;
+  { Por padrao a pasta lista objetos do mesmo tipo que ela representa; nos de
+    pasta de verdade (mkFolder) recebem o tipo explicitamente. }
+  FFolderKind := AKind;
   FName := AName;
   FDetail := ADetail;
   FChildren := specialize TObjectList<TMetadataNode>.Create(True);

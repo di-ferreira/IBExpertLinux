@@ -55,7 +55,9 @@ var
   Form: TfrmMain;
   Profile: TConnectionProfile;
   Tab: TSqlTabFrame;
-  Wait: Integer;
+  Wait, I: Integer;
+  Folder: TTreeNode;
+  Allow, FoundTable: Boolean;
 begin
   if ParamCount < 5 then
   begin
@@ -79,6 +81,25 @@ begin
     PumpFor(300);
     Check('arvore populada', Form.Tree.Items.Count > 0,
       Format('(%d)', [Form.Tree.Items.Count]));
+
+    { Expande a pasta "Tabelas" pelo mesmo evento que a UI usa. }
+    Folder := nil;
+    for I := 0 to Form.Tree.Items.Count - 1 do
+      if SameText(Form.Tree.Items[I].Text, 'Tabelas') then
+        Folder := Form.Tree.Items[I];
+    Check('pasta Tabelas na arvore', Assigned(Folder));
+    if Assigned(Folder) then
+    begin
+      Allow := True;
+      Form.Tree.OnExpanding(Form.Tree, Folder, Allow);
+      Check('expansao permitida', Allow);
+      FoundTable := False;
+      for I := 0 to Folder.Count - 1 do
+        if SameText(Folder.Items[I].Text, 'TESTE_IBSTUDIO') then
+          FoundTable := True;
+      Check('tabela listada na arvore', FoundTable,
+        Format('(%d filhos)', [Folder.Count]));
+    end;
 
     WriteLn('--- execucao pela aba SQL ---');
     Tab := Form.ActiveTab;
