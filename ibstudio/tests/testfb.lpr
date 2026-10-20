@@ -11,7 +11,7 @@ program testfb;
 
 uses
   SysUtils, Classes, DB, sqldb, IBConnection, bufdataset,
-  ibtypes, ibsqlutil, ibmetadata, ibdml, ibsession;
+  ibtypes, ibsqlutil, ibmetadata, ibdml, ibcsv, ibsession;
 
 var
   Failures: Integer = 0;
@@ -392,6 +392,95 @@ begin
   end;
 end;
 
+procedure TestCsvImport(AProfile: TConnectionProfile);
+var
+  S: TIBStudioSession;
+  Q: TSQLQuery;
+  Table: TCsvTable;
+  FileStream: TFileStream;
+  OutStream: TFileStream;
+  Options: TCsvOptions;
+  CsvFile: string;
+  SQL: string;
+  Content: string;
+  R, C, N: Integer;
+  Params: TParams;
+begin
+  WriteLn('--- importacao de CSV ---');
+  S := TIBStudioSession.Create;
+  try
+    S.Connect(AProfile);
+    S.Execute('recreate table import_teste (id integer, nome varchar(30))', nil, True);
+
+    CsvFile := IncludeTrailingPathDelimiter(GetTempDir) + 'ibstudio-import.csv';
+    DefaultCsvOptions(Options);
+    Options.NullToken := 'NULL';
+
+    OutStream := TFileStream.Create(CsvFile, fmCreate);
+    try
+      Content := 'id;nome'#13#10'1;Ana'#13#10'2;Bruno'#13#10'3;NULL'#13#10;
+      OutStream.WriteBuffer(Content[1], Length(Content));
+    finally
+      OutStream.Free;
+    end;
+
+    FileStream := TFileStream.Create(CsvFile, fmOpenRead or fmShareDenyNone);
+    try
+      Table := ReadCsv(FileStream, Options);
+    finally
+      FileStream.Free;
+    end;
+    try
+      Check('csv lido com 3 linhas', Table.RowCount = 3,
+        Format('(%d)', [Table.RowCount]));
+      Check('colunas do csv', Table.ColumnCount = 2,
+        Format('(%d)', [Table.ColumnCount]));
+
+      N := 0;
+      for R := 0 to Table.RowCount - 1 do
+      begin
+        Params := TParams.Create(nil);
+        try
+          Params.CreateParam(ftInteger, 'p0', ptInput);
+          Params.CreateParam(ftString, 'p1', ptInput);
+          Params.ParamByName('p0').AsInteger := StrToInt(Table.Cell(R, 0));
+          if Table.Cell(R, 1) = Options.NullToken then
+            Params.ParamByName('p1').Clear
+          else
+            Params.ParamByName('p1').AsString := Table.Cell(R, 1);
+          SQL := 'insert into import_teste (id, nome) values (:p0, :p1)';
+          S.Execute(SQL, Params, False);
+          Inc(N);
+        finally
+          Params.Free;
+        end;
+      end;
+      S.Commit;
+      Check('3 linhas importadas', N = 3, Format('(%d)', [N]));
+
+      Q := TSQLQuery.Create(nil);
+      try
+        Q.DataBase := S.Connection;
+        Q.Transaction := S.Transaction;
+        Q.SQL.Text := 'select count(*) as n from import_teste';
+        Q.Open;
+        Check('tabela com 3 registros', Q.Fields[0].AsInteger = 3,
+          Q.Fields[0].AsString);
+        Q.Close;
+      finally
+        Q.Free;
+      end;
+    finally
+      Table.Free;
+    end;
+
+    S.Execute('drop table import_teste', nil, True);
+  finally
+    S.Free;
+  end;
+  DeleteFile(CsvFile);
+end;
+
 var
   Mode, Host, Port, DBFile, User, Pass: string;
   Profile: TConnectionProfile;
@@ -417,6 +506,7 @@ begin
       TestExecutor(Profile);
       TestExecuteParams(Profile);
       TestDmlGeneration(Profile);
+      TestCsvImport(Profile);
     except
       on E: Exception do
       begin

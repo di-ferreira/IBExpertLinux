@@ -11,7 +11,7 @@ uses
   Classes, SysUtils, Forms, Controls, StdCtrls, ExtCtrls, ComCtrls, DBGrids, DB,
   Graphics, Dialogs, LCLType, ClipBrD, SynEdit, SynEditTypes, SynEditHighlighter,
   SynCompletion, SynHighlighterSQL, bufdataset, ibtypes, ibsqlutil, ibmetadata,
-  ibdml, ibsession, uEditRecord;
+  ibdml, ibcsv, ibsession, uEditRecord;
 
 type
   TQueryThread = class;
@@ -86,6 +86,8 @@ type
     property EditRelation: string read FEditRelation;
     { Texto do painel de mensagens (usado nos testes). }
     function LogText: string;
+    { Exporta o resultado atual para um arquivo CSV. }
+    function ExportCsv(const AFileName: string; const AOptions: TCsvOptions): Integer;
     { Aplica edicoes de campos no registro atual (usado pelo dialogo e pelos
       testes de fumaca). }
     function ApplyEdits(const AValues, ANulls: TStrings): Boolean;
@@ -607,6 +609,22 @@ end;
 function TSqlTabFrame.LogText: string;
 begin
   Result := FMsg.Text;
+end;
+
+function TSqlTabFrame.ExportCsv(const AFileName: string;
+  const AOptions: TCsvOptions): Integer;
+var
+  F: TFileStream;
+begin
+  Result := 0;
+  if (AFileName = '') or not Assigned(FBuffer) then
+    Exit;
+  F := TFileStream.Create(AFileName, fmCreate);
+  try
+    Result := WriteCsv(FBuffer, F, AOptions);
+  finally
+    F.Free;
+  end;
 end;
 
 procedure TSqlTabFrame.SetBusy(ABusy: Boolean);

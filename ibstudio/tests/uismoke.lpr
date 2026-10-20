@@ -10,7 +10,7 @@ program uismoke;
 uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
   Interfaces, Forms, SysUtils, Classes, Controls, ComCtrls, ExtCtrls, DB, sqldb,
-  ibtypes, ibsession, uMain, uSqlTab, uSqlPreview, uEditRecord;
+  ibtypes, ibsession, ibcsv, uMain, uSqlTab, uSqlPreview, uEditRecord;
 
 var
   Failures: Integer = 0;
@@ -86,6 +86,10 @@ var
   DlgEdit: TfrmEditRecord;
   Metas: TFieldMetaArray;
   Init: TStringList;
+  CsvFile: string;
+  CsvOpts: TCsvOptions;
+  CsvStream: TFileStream;
+  CsvTable: TCsvTable;
   Wait, I: Integer;
   Folder, TableNode: TTreeNode;
   Allow, FoundTable: Boolean;
@@ -155,6 +159,31 @@ begin
         Check('tabela aberta com 3 linhas',
           Assigned(Tab) and (Tab.ResultRowCount = 3),
           Format('(%d)', [Tab.ResultRowCount]));
+
+        { Exportacao do resultado para CSV. }
+        if Assigned(Tab) then
+        begin
+          WriteLn('--- exportacao CSV ---');
+          CsvFile := IncludeTrailingPathDelimiter(GetTempDir) +
+            'ibstudio-export.csv';
+          DefaultCsvOptions(CsvOpts);
+          Check('exportou 3 linhas', Tab.ExportCsv(CsvFile, CsvOpts) = 3);
+          CsvStream := TFileStream.Create(CsvFile, fmOpenRead or fmShareDenyNone);
+          try
+            CsvTable := ReadCsv(CsvStream, CsvOpts);
+          finally
+            CsvStream.Free;
+          end;
+          try
+            Check('csv com 6 colunas', CsvTable.ColumnCount = 6,
+              Format('(%d)', [CsvTable.ColumnCount]));
+            Check('csv com 3 linhas', CsvTable.RowCount = 3,
+              Format('(%d)', [CsvTable.RowCount]));
+          finally
+            CsvTable.Free;
+          end;
+          DeleteFile(CsvFile);
+        end;
 
         { Edicao de dados: altera o nome do registro 1 e confere no banco. }
         if Assigned(Tab) then

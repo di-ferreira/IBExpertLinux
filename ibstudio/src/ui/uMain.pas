@@ -8,8 +8,8 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, StdCtrls, ExtCtrls, ComCtrls, Menus,
   Graphics, Dialogs, LCLType,
-  ibtypes, ibsqlutil, ibmetadata, ibsettings, ibsession, uConnect, uSqlTab,
-  uSqlPreview;
+  ibtypes, ibsqlutil, ibmetadata, ibsettings, ibcsv, ibsession, uConnect,
+  uSqlTab, uSqlPreview, uCsvOptions, uImportCsv;
 
 type
   TfrmMain = class(TForm)
@@ -36,6 +36,8 @@ type
     procedure RunClick(Sender: TObject);
     procedure CompleteClick(Sender: TObject);
     procedure MenuPreviewClick(Sender: TObject);
+    procedure MenuExportCsvClick(Sender: TObject);
+    procedure MenuImportCsvClick(Sender: TObject);
     procedure MenuExitClick(Sender: TObject);
     procedure MenuAboutClick(Sender: TObject);
     procedure TreeExpanding(Sender: TObject; Node: TTreeNode; var AllowChange: Boolean);
@@ -162,6 +164,18 @@ begin
   Item := TMenuItem.Create(Main);
   Item.Caption := 'Fechar aba';
   Item.OnClick := @CloseTabClick;
+  MQuery.Add(Item);
+
+  MQuery.AddSeparator;
+
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Exportar CSV...';
+  Item.OnClick := @MenuExportCsvClick;
+  MQuery.Add(Item);
+
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Importar CSV...';
+  Item.OnClick := @MenuImportCsvClick;
   MQuery.Add(Item);
 
   MFerramentas := TMenuItem.Create(Main);
@@ -620,6 +634,67 @@ begin
   Tab := ActiveTab;
   if Assigned(Tab) then
     ShowSqlPreview('Prévia de SQL', Tab.SqlText);
+end;
+
+procedure TfrmMain.MenuExportCsvClick(Sender: TObject);
+var
+  Tab: TSqlTabFrame;
+  Dlg: TSaveDialog;
+  Opts, NewOpts: TCsvOptions;
+  N: Integer;
+begin
+  Tab := ActiveTab;
+  if not Assigned(Tab) then
+    Exit;
+  if Tab.ResultRowCount = 0 then
+  begin
+    MessageDlg('Nada para exportar',
+      'Execute uma consulta antes de exportar o resultado.', mtInformation,
+      [mbOK], 0);
+    Exit;
+  end;
+
+  DefaultCsvOptions(Opts);
+  if not CsvOptionsDialog(Opts, NewOpts) then
+    Exit;
+
+  Dlg := TSaveDialog.Create(Self);
+  try
+    Dlg.Filter := 'Arquivos CSV (*.csv)|*.csv';
+    Dlg.DefaultExt := 'csv';
+    if FSettings.LastDirectory <> '' then
+      Dlg.InitialDir := FSettings.LastDirectory;
+    if Dlg.Execute then
+    begin
+      N := Tab.ExportCsv(Dlg.FileName, NewOpts);
+      FSettings.LastDirectory := ExtractFileDir(Dlg.FileName);
+      FSettings.Save;
+      FStatus.SimpleText := Format('%d linha(s) exportada(s) para %s',
+        [N, Dlg.FileName]);
+    end;
+  finally
+    Dlg.Free;
+  end;
+end;
+
+procedure TfrmMain.MenuImportCsvClick(Sender: TObject);
+var
+  Dlg: TfrmImportCsv;
+begin
+  if not FSession.Connected then
+  begin
+    MessageDlg('Sem conexao', 'Conecte-se a um banco antes de importar.',
+      mtInformation, [mbOK], 0);
+    Exit;
+  end;
+
+  Dlg := TfrmImportCsv.Create(Self);
+  try
+    Dlg.SetSession(FSession);
+    Dlg.ShowModal;
+  finally
+    Dlg.Free;
+  end;
 end;
 
 procedure TfrmMain.MenuExitClick(Sender: TObject);
