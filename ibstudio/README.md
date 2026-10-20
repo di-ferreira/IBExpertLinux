@@ -75,13 +75,16 @@ make check    # compila núcleo + camada de banco (link)
 Integração com um Firebird real (cria o banco de teste):
 
 ```sh
-make testfb FB=localhost/3050:/tmp/ibstudio_test.fdb USER=SYSDBA PASS=masterkey
+make testfb FB=localhost/3050:/tmp/ibstudio_test.fdb TEST_USER=SYSDBA TEST_PASS=masterkey
 ```
+
+O banco é criado na primeira execução; nas seguintes o teste reaproveita o
+arquivo existente.
 
 Fumaça da interface (precisa de servidor X):
 
 ```sh
-make uismoke FB=localhost/3050:/tmp/ibstudio_test.fdb USER=SYSDBA PASS=masterkey
+make uismoke FB=localhost/3050:/tmp/ibstudio_test.fdb TEST_USER=SYSDBA TEST_PASS=masterkey
 ```
 
 O teste de integração cobre: conexão, listagem de tabelas, colunas com tipo
