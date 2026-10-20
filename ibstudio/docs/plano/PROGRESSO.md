@@ -10,7 +10,7 @@ mudar de estado). O plano completo está em `00-plano-geral.md`.
 | 0 | [Fundação](fase-00-fundacao.md) | concluída | 2026-10-20 | 2026-10-20 | `8ae1f06` |
 | 1 | [Edição de dados](fase-01-edicao-dados.md) | concluída | 2026-10-20 | 2026-10-20 | `4651fa1` |
 | 2 | [CSV](fase-02-csv.md) | concluída | 2026-10-20 | 2026-10-20 | `25025d2` |
-| 3 | [Editor de tabela](fase-03-editor-tabela.md) | pendente | — | — | — |
+| 3 | [Editor de tabela](fase-03-editor-tabela.md) | concluída | 2026-10-20 | 2026-10-20 | `9fdf618` |
 | 4 | [Editores de código](fase-04-editores-codigo.md) | pendente | — | — | — |
 | 5 | [Administração](fase-05-administracao.md) | pendente | — | — | — |
 | 6 | [Extração/comparador](fase-06-extracao-comparador.md) | pendente | — | — | — |
@@ -123,8 +123,37 @@ feito. Se algo ficar para depois, registrar como pendência da fase seguinte.
     token confere); na exportação o NULL vira o token escolhido.
 
 ### Fase 3 — Editor de tabela
-- Status: pendente
-- Observações: —
+- Status: concluída (2026-10-20, commit `9fdf618`)
+- Entregue:
+  - `src/core/ibddl.pas`: modelos (`TTableModel`, `TFieldDefModel`,
+    `TIndexModel`, `TFkModel`) e geração de DDL — `CreateTableSQL`,
+    `AlterTableSQL` (diff entre dois modelos), `DropTableSQL`,
+    `FieldTypeSQL`, `PrimaryKeyFields` e `RefRuleName`.
+  - `src/core/ibmetadata.pas`: `BaseTypeName` (nome do tipo sem tamanho).
+  - `src/core/ibsession.pas`: `LoadTableModel` (campos, chave primária,
+    índices e chaves estrangeiras do catálogo) e `ExecuteScript` (vários
+    comandos em transação, com rollback e mensagem de erro).
+  - `src/ui/uTableEditor.pas`: editor em abas (Campos, Índices, Chaves
+    estrangeiras) com prévia do script e execução com confirmação; a chave
+    primária é definida pela coluna "PK" da grade de campos.
+  - `src/ui/uMain.pas`: menu *Banco > Nova tabela…* e item "Editar estrutura"
+    no menu de contexto da árvore.
+- Testes: `tc_ddl.pas` (7 casos, núcleo = 60), bloco `editor de tabela` no
+  `testfb.lpr` (cria a tabela pelo script gerado, lê o modelo de volta,
+  executa um `alter` e confere a coluna nova, remove a tabela) e no
+  `uismoke.lpr` (o editor carrega a estrutura e a chave primária).
+- Verificação: `make check`, `make test` (60/60), `make testfb` e `make
+  uismoke` verdes; editor conferido na GUI real.
+- Observações/desvios:
+  - O SQL do catálogo muda entre o Firebird 2.5 e o 3.0 (origem computada,
+    colunas de `rdb$ref_constraints`): as consultas usam `rdb$relation_constraints`
+    e tentam as duas variantes da origem computada.
+  - A posição dos segmentos de índice começa em 0 no 2.5 e em 1 no 3.0: a
+    ordem da chave primária é recalculada pela posição no resultado.
+  - A escala do NUMERIC vem negativa no catálogo: o modelo guarda o valor
+    absoluto.
+  - A spec previa abas separadas para a chave primária; ela ficou como uma
+    coluna "PK" na grade de campos (posição na chave).
 
 ### Fase 4 — Editores de código
 - Status: pendente
