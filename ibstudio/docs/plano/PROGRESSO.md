@@ -9,7 +9,7 @@ mudar de estado). O plano completo está em `00-plano-geral.md`.
 |---|---|---|---|---|---|
 | 0 | [Fundação](fase-00-fundacao.md) | concluída | 2026-10-20 | 2026-10-20 | `8ae1f06` |
 | 1 | [Edição de dados](fase-01-edicao-dados.md) | concluída | 2026-10-20 | 2026-10-20 | `4651fa1` |
-| 2 | [CSV](fase-02-csv.md) | pendente | — | — | — |
+| 2 | [CSV](fase-02-csv.md) | concluída | 2026-10-20 | 2026-10-20 | `25025d2` |
 | 3 | [Editor de tabela](fase-03-editor-tabela.md) | pendente | — | — | — |
 | 4 | [Editores de código](fase-04-editores-codigo.md) | pendente | — | — | — |
 | 5 | [Administração](fase-05-administracao.md) | pendente | — | — | — |
@@ -95,8 +95,32 @@ feito. Se algo ficar para depois, registrar como pendência da fase seguinte.
     do banco).
 
 ### Fase 2 — CSV
-- Status: pendente
-- Observações: —
+- Status: concluída (2026-10-20, commit `25025d2`)
+- Entregue:
+  - `src/core/ibcsv.pas`: `TCsvOptions`, `TCsvTable`, `CsvEscape`,
+    `CsvUnescape`, `WriteCsv`, `ReadCsv` e a conversão de codificação
+    (UTF-8 e ISO-8859-1, transcodificando de verdade).
+  - `src/ui/uCsvOptions.pas`: diálogo de opções (separador, cabeçalho, texto
+    de NULL, codificação), reaproveitado na exportação e na importação.
+  - `src/ui/uImportCsv.pas`: importação com arquivo, prévia das 10 primeiras
+    linhas, tabela de destino, correspondência coluna → campo (automática
+    pelo nome), inserção parametrizada em transação (commit a cada 500
+    linhas) e rollback com mensagem em caso de erro.
+  - `src/ui/uSqlTab.pas`: `ExportCsv` grava o resultado da aba; o cursor da
+    grade é preservado durante a exportação.
+  - `src/ui/uMain.pas`: menu *Consulta > Exportar CSV…* e
+    *Consulta > Importar CSV…*; a última pasta usada fica nas configurações.
+- Testes: `tc_csv.pas` (6 casos, núcleo = 53), bloco `importacao de CSV` no
+  `testfb.lpr` (3 linhas importadas numa tabela temporária) e no
+  `uismoke.lpr` (exportação do resultado com 6 colunas e 3 linhas relidas do
+  arquivo).
+- Verificação: `make check`, `make test` (53/53), `make testfb` e `make
+  uismoke` verdes; diálogo de importação conferido na GUI real.
+- Observações/desvios:
+  - A spec não previa opção de leitura com/sem cabeçalho: `TCsvOptions` tem
+    `WriteHeader` e `ReadHeader`.
+  - O texto de NULL é aplicado na importação (campo vazio = NULL quando o
+    token confere); na exportação o NULL vira o token escolhido.
 
 ### Fase 3 — Editor de tabela
 - Status: pendente
