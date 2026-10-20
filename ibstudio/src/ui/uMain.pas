@@ -8,7 +8,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, StdCtrls, ExtCtrls, ComCtrls, Menus,
   Graphics, Dialogs, IniFiles, LCLType,
-  ibtypes, ibmetadata, ibsession, uConnect, uSqlTab;
+  ibtypes, ibsqlutil, ibmetadata, ibsession, uConnect, uSqlTab;
 
 type
   TfrmMain = class(TForm)
@@ -24,23 +24,34 @@ type
     FConnectBtn: TButton;
     FDisconnectBtn: TButton;
     FRunBtn: TButton;
+    FTreeMenu: TPopupMenu;
+    FMiOpenData: TMenuItem;
+    FMiNewSql: TMenuItem;
     procedure BuildUi;
     procedure ConnectClick(Sender: TObject);
     procedure DisconnectClick(Sender: TObject);
     procedure NewTabClick(Sender: TObject);
     procedure CloseTabClick(Sender: TObject);
     procedure RunClick(Sender: TObject);
+    procedure CompleteClick(Sender: TObject);
     procedure MenuExitClick(Sender: TObject);
     procedure MenuAboutClick(Sender: TObject);
     procedure TreeExpanding(Sender: TObject; Node: TTreeNode; var AllowChange: Boolean);
     procedure TreeDblClick(Sender: TObject);
+    procedure TreeMouseDown(Sender: TObject; Button: TMouseButton;
+      Shift: TShiftState; X, Y: Integer);
+    procedure TreeMenuPopup(Sender: TObject);
+    procedure OpenDataClick(Sender: TObject);
+    procedure NewSqlFromTreeClick(Sender: TObject);
+    { Abre uma aba com "select first 100" e executa. }
+    procedure OpenDataTab(const ARelation: string);
     procedure DoConnect(const AProfile: TConnectionProfile);
     procedure DoDisconnect;
     procedure PopulateTree;
     procedure FreeTreeData;
     procedure FillTreeNode(ATreeItem: TTreeNode; AMeta: TMetadataNode);
     procedure UpdateStatus;
-    function NewSqlTab(const ASQL: string): TSqlTabFrame;
+    function NewSqlTab(const ASQL: string; const ATitle: string = ''): TSqlTabFrame;
     procedure LoadSettings;
     procedure SaveSettings;
     function SettingsFile: string;
@@ -175,6 +186,11 @@ begin
   MQuery.Add(Item);
 
   Item := TMenuItem.Create(Main);
+  Item.Caption := 'Completar código (Ctrl+Espaço)';
+  Item.OnClick := @CompleteClick;
+  MQuery.Add(Item);
+
+  Item := TMenuItem.Create(Main);
   Item.Caption := 'Fechar aba';
   Item.OnClick := @CloseTabClick;
   MQuery.Add(Item);
@@ -256,6 +272,20 @@ begin
   FTree.HideSelection := False;
   FTree.OnExpanding := @TreeExpanding;
   FTree.OnDblClick := @TreeDblClick;
+  FTree.OnMouseDown := @TreeMouseDown;
+
+  { Menu de contexto da arvore: duplo clique e atalho para "Show data". }
+  FTreeMenu := TPopupMenu.Create(Self);
+  FMiOpenData := TMenuItem.Create(FTreeMenu);
+  FMiOpenData.Caption := 'Abrir dados';
+  FMiOpenData.OnClick := @OpenDataClick;
+  FTreeMenu.Items.Add(FMiOpenData);
+  FMiNewSql := TMenuItem.Create(FTreeMenu);
+  FMiNewSql.Caption := 'Novo SQL';
+  FMiNewSql.OnClick := @NewSqlFromTreeClick;
+  FTreeMenu.Items.Add(FMiNewSql);
+  FTreeMenu.OnPopup := @TreeMenuPopup;
+  FTree.PopupMenu := FTreeMenu;
   FTree.Font.Name := 'DejaVu Sans';
   FTree.Font.Size := 10;
 
@@ -322,6 +352,8 @@ begin
 end;
 
 procedure TfrmMain.DoConnect(const AProfile: TConnectionProfile);
+var
+  I: Integer;
 begin
   if FSession.Connected then
     FSession.Disconnect;
@@ -332,8 +364,9 @@ begin
     SaveSettings;
     PopulateTree;
     UpdateStatus;
-    if FTabs.PageCount > 0 then
-      TSqlTabFrame(FTabs.Pages[0].Controls[0]).SetProfile(FProfile);
+    for I := 0 to FTabs.PageCount - 1 do
+      if FTabs.Pages[I].ControlCount > 0 then
+        TSqlTabFrame(FTabs.Pages[I].Controls[0]).SetProfile(FProfile);
   except
     on E: Exception do
     begin
@@ -479,8 +512,63 @@ begin
     mkFolder:
       Node.Expand(False);
     mkTable, mkView:
-      NewSqlTab(Format('select first 100 * from %s', [Meta.Name]));
+      OpenDataTab(Meta.Name);
   end;
+end;
+
+procedure TfrmMain.TreeMouseDown(Sender: TObject; Button: TMouseButton;
+  Shift: TShiftState; X, Y: Integer);
+var
+  Node: TTreeNode;
+begin
+  if Button <> mbRight then
+    Exit;
+  Node := FTree.GetNodeAt(X, Y);
+  if Assigned(Node) then
+    FTree.Selected := Node;
+end;
+
+procedure TfrmMain.TreeMenuPopup(Sender: TObject);
+var
+  Meta: TMetadataNode;
+begin
+  Meta := nil;
+  if Assigned(FTree.Selected) and Assigned(FTree.Selected.Data) then
+    Meta := TMetadataNode(FTree.Selected.Data);
+  FMiOpenData.Enabled := Assigned(Meta) and
+    ((Meta.Kind = mkTable) or (Meta.Kind = mkView));
+end;
+
+procedure TfrmMain.OpenDataClick(Sender: TObject);
+var
+  Meta: TMetadataNode;
+begin
+  if not Assigned(FTree.Selected) or not Assigned(FTree.Selected.Data) then
+    Exit;
+  Meta := TMetadataNode(FTree.Selected.Data);
+  if (Meta.Kind = mkTable) or (Meta.Kind = mkView) then
+    OpenDataTab(Meta.Name);
+end;
+
+procedure TfrmMain.NewSqlFromTreeClick(Sender: TObject);
+begin
+  NewSqlTab('');
+end;
+
+procedure TfrmMain.OpenDataTab(const ARelation: string);
+var
+  Tab: TSqlTabFrame;
+begin
+  if not FSession.Connected then
+  begin
+    MessageDlg('Conecte-se ao banco para ver os dados da tabela.',
+      mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  Tab := NewSqlTab(
+    Format('select first 100 * from %s', [QuoteIdentifier(ARelation)]),
+    ARelation);
+  Tab.ExecuteScript;
 end;
 
 function TfrmMain.ActiveTab: TSqlTabFrame;
@@ -493,17 +581,21 @@ begin
     Result := TSqlTabFrame(Sheet.Controls[0]);
 end;
 
-function TfrmMain.NewSqlTab(const ASQL: string): TSqlTabFrame;
+function TfrmMain.NewSqlTab(const ASQL: string; const ATitle: string): TSqlTabFrame;
 var
   Sheet: TTabSheet;
 begin
   Sheet := TTabSheet.Create(FTabs);
   Sheet.PageControl := FTabs;
-  Sheet.Caption := 'SQL ' + IntToStr(FTabs.PageCount);
+  if ATitle = '' then
+    Sheet.Caption := 'SQL ' + IntToStr(FTabs.PageCount)
+  else
+    Sheet.Caption := Copy(ATitle, 1, 28);
 
   Result := TSqlTabFrame.Create(Sheet);
   Result.Parent := Sheet;
   Result.Align := alClient;
+  Result.SetSession(FSession);
   if FSession.Connected then
     Result.SetProfile(FProfile);
   if ASQL <> '' then
@@ -533,6 +625,15 @@ begin
   Tab := ActiveTab;
   if Assigned(Tab) then
     Tab.ExecuteScript;
+end;
+
+procedure TfrmMain.CompleteClick(Sender: TObject);
+var
+  Tab: TSqlTabFrame;
+begin
+  Tab := ActiveTab;
+  if Assigned(Tab) then
+    Tab.ShowCompletion;
 end;
 
 procedure TfrmMain.MenuExitClick(Sender: TObject);

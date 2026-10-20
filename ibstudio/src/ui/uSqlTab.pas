@@ -9,8 +9,8 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, StdCtrls, ExtCtrls, ComCtrls, DBGrids, DB,
-  Graphics, Dialogs, LCLType, SynEdit, SynEditTypes, SynHighlighterSQL, bufdataset,
-  ibtypes, ibsqlutil, ibsession;
+  Graphics, Dialogs, LCLType, SynEdit, SynEditTypes, SynEditHighlighter,
+  SynCompletion, SynHighlighterSQL, bufdataset, ibtypes, ibsqlutil, ibsession;
 
 type
   TQueryThread = class;
@@ -26,24 +26,40 @@ type
     FBuffer: TResultBuffer;
     FThread: TQueryThread;
     FProfile: TConnectionProfile;
+    FSession: TIBStudioSession;
     FStatusLabel: TLabel;
     FBtnRun: TButton;
     FBtnStop: TButton;
     FPanelEditor: TPanel;
+    FCompletion: TSynCompletion;
+    FAutoTimer: TTimer;
     procedure BuildUi;
     procedure BtnRunClick(Sender: TObject);
     procedure BtnStopClick(Sender: TObject);
     procedure EditorKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure EditorKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure AutoTimerTick(Sender: TObject);
+    function CaretInStringOrComment: Boolean;
+    procedure CompletionExecute(Sender: TObject);
     procedure QueryFinished(Sender: TObject);
     procedure SetBusy(ABusy: Boolean);
     procedure LogMessage(const S: string);
+    function TextUpToCaret: string;
+    procedure AddItem(const AText: string);
+    procedure AddRelations;
+    procedure AddFieldsOf(const ARelation: string);
+    procedure AddKeywords;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     procedure SetProfile(const AProfile: TConnectionProfile);
+    { Sessao usada apenas para metadados do autocompletar (nao e owned). }
+    procedure SetSession(ASession: TIBStudioSession);
     procedure SetSqlText(const ASQL: string);
     procedure ExecuteScript;
     procedure FocusEditor;
+    { Abre a lista de completar no cursor (Ctrl+Espaco). }
+    procedure ShowCompletion;
     function ScriptTitle: string;
     { A execucao roda em thread; estes dois servem para esperar/validar. }
     function Busy: Boolean;
@@ -161,6 +177,7 @@ var
   Syn: TSynSQLSyn;
 begin
   FProfile := nil;
+  FSession := nil;
 
   Self.Align := alClient;
   Self.Width := 700;
@@ -216,9 +233,24 @@ begin
   FEditor.Font.Size := 10;
   FEditor.Options := FEditor.Options + [eoBracketHighlight];
   FEditor.OnKeyDown := @EditorKeyDown;
+  FEditor.OnKeyUp := @EditorKeyUp;
   Syn := TSynSQLSyn.Create(Self);
   Syn.SQLDialect := sqlInterbase6;
   FEditor.Highlighter := Syn;
+
+  FCompletion := TSynCompletion.Create(Self);
+  FCompletion.Editor := FEditor;
+  FCompletion.EndOfTokenChr := '()[].;,=+-*/<>|&!@~^%''"{}';
+  FCompletion.CaseSensitive := False;
+  FCompletion.LinesInWindow := 14;
+  FCompletion.Width := 360;
+  FCompletion.OnExecute := @CompletionExecute;
+
+  { Depois de digitar o ponto, abre a lista de campos daquela tabela/apelido. }
+  FAutoTimer := TTimer.Create(Self);
+  FAutoTimer.Interval := 120;
+  FAutoTimer.Enabled := False;
+  FAutoTimer.OnTimer := @AutoTimerTick;
 
   Splitter := TSplitter.Create(Self);
   Splitter.Parent := Self;
@@ -259,6 +291,188 @@ begin
   FProfile := nil;
   if Assigned(AProfile) then
     FProfile := AProfile.Clone;
+end;
+
+procedure TSqlTabFrame.SetSession(ASession: TIBStudioSession);
+begin
+  FSession := ASession;
+end;
+
+function TSqlTabFrame.TextUpToCaret: string;
+var
+  I, LastLine: Integer;
+begin
+  Result := '';
+  if (FEditor.CaretY < 1) or (FEditor.CaretY > FEditor.Lines.Count) then
+    Exit;
+  LastLine := FEditor.CaretY - 2;
+  for I := 0 to LastLine do
+    Result := Result + FEditor.Lines[I] + LineEnding;
+  Result := Result + Copy(FEditor.Lines[FEditor.CaretY - 1], 1, FEditor.CaretX - 1);
+end;
+
+procedure TSqlTabFrame.AddItem(const AText: string);
+begin
+  if (AText = '') or (FCompletion.ItemList.IndexOf(AText) >= 0) then
+    Exit;
+  FCompletion.ItemList.Add(AText);
+end;
+
+procedure TSqlTabFrame.AddRelations;
+var
+  Names: TStrings;
+  I: Integer;
+begin
+  if not Assigned(FSession) then
+    Exit;
+  Names := FSession.RelationNames;
+  for I := 0 to Names.Count - 1 do
+    AddItem(QuoteIdentifier(Names[I]));
+end;
+
+procedure TSqlTabFrame.AddFieldsOf(const ARelation: string);
+var
+  Fields: TStrings;
+  I: Integer;
+begin
+  if not Assigned(FSession) then
+    Exit;
+  Fields := FSession.RelationFields(ARelation);
+  if not Assigned(Fields) then
+    Exit;
+  for I := 0 to Fields.Count - 1 do
+    AddItem(QuoteIdentifier(Fields[I]));
+end;
+
+procedure TSqlTabFrame.AddKeywords;
+var
+  Words: TStringArray;
+  I: Integer;
+begin
+  Words := SqlKeywords;
+  for I := 0 to High(Words) do
+    AddItem(Words[I]);
+  Words := SqlFunctions;
+  for I := 0 to High(Words) do
+    AddItem(Words[I]);
+end;
+
+procedure TSqlTabFrame.CompletionExecute(Sender: TObject);
+var
+  SQLText: string;
+  Req: TCompletionRequest;
+  Relations: TStringArray;
+  Rel: string;
+  I: Integer;
+begin
+  FCompletion.ItemList.BeginUpdate;
+  try
+    FCompletion.ItemList.Clear;
+    try
+      SQLText := TextUpToCaret;
+      Req := CompletionRequestAt(SQLText);
+      case Req.Kind of
+        ckRelation:
+          begin
+            AddRelations;
+            AddKeywords;
+          end;
+
+        ckField:
+          begin
+            if Req.Qualifier <> '' then
+            begin
+              Rel := ResolveRelationQualifier(SQLText, Req.Qualifier);
+              if Rel <> '' then
+                AddFieldsOf(Rel)
+              else
+                AddRelations;
+            end
+            else
+            begin
+              Relations := ReferencedRelations(SQLText);
+              for I := 0 to High(Relations) do
+                AddFieldsOf(Relations[I]);
+            end;
+            AddKeywords;
+          end;
+
+      else
+        begin
+          AddKeywords;
+          AddRelations;
+        end;
+      end;
+    except
+      on E: Exception do
+        LogMessage('Autocompletar: ' + DescribeException(E));
+    end;
+  finally
+    FCompletion.ItemList.EndUpdate;
+  end;
+
+  { Seleciona o primeiro item que casa com o que ja foi digitado. }
+  FCompletion.Position := -1;
+  for I := 0 to FCompletion.ItemList.Count - 1 do
+    if (FCompletion.CurrentString = '') or
+       SameText(Copy(FCompletion.ItemList[I], 1,
+         Length(FCompletion.CurrentString)), FCompletion.CurrentString) then
+    begin
+      FCompletion.Position := I;
+      Break;
+    end;
+end;
+
+procedure TSqlTabFrame.ShowCompletion;
+var
+  P: TPoint;
+  Req: TCompletionRequest;
+begin
+  if FCompletion.IsActive then
+    FCompletion.Deactivate;
+  P := FEditor.ClientToScreen(
+    Point(FEditor.CaretXPix, FEditor.CaretYPix + FEditor.LineHeight + 1));
+  Req := CompletionRequestAt(TextUpToCaret);
+  FCompletion.Execute(Req.Prefix, P);
+end;
+
+function TSqlTabFrame.CaretInStringOrComment: Boolean;
+var
+  Token: string;
+  Attri: TSynHighlighterAttributes;
+  P: TPoint;
+begin
+  Result := False;
+  P := Point(FEditor.CaretX, FEditor.CaretY);
+  if P.X > 1 then
+    Dec(P.X);
+  if not FEditor.GetHighlighterAttriAtRowCol(P, Token, Attri) then
+    Exit;
+  Result := (Pos('String', Token) > 0) or (Pos('Comment', Token) > 0);
+end;
+
+procedure TSqlTabFrame.EditorKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
+begin
+  if FCompletion.IsActive then
+    Exit;
+  if (FEditor.CaretX > 1) and
+     (FEditor.LineText[FEditor.CaretX - 1] = '.') and
+     not CaretInStringOrComment then
+  begin
+    FAutoTimer.Enabled := False;
+    FAutoTimer.Enabled := True;
+  end;
+end;
+
+procedure TSqlTabFrame.AutoTimerTick(Sender: TObject);
+begin
+  FAutoTimer.Enabled := False;
+  if FCompletion.IsActive or not FEditor.Focused then
+    Exit;
+  if (FEditor.CaretX > 1) and
+     (FEditor.LineText[FEditor.CaretX - 1] = '.') and
+     not CaretInStringOrComment then
+    ShowCompletion;
 end;
 
 procedure TSqlTabFrame.FocusEditor;
@@ -416,6 +630,15 @@ begin
         LogMessage('    comando: ' + Copy(Outcome.Statement, 1, 160));
       end;
     end;
+
+    { DDL pode mudar o catalogo: descarta o cache do autocompletar. }
+    if Assigned(FSession) then
+      for I := 0 to High(Thread.Outcomes) do
+        if Thread.Outcomes[I].Succeeded and (Thread.Outcomes[I].Kind = skDdl) then
+        begin
+          FSession.ClearMetadataCache;
+          Break;
+        end;
 
     { Adota o buffer produzido pela thread. }
     FSource.DataSet := nil;

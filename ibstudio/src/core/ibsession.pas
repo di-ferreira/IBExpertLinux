@@ -39,6 +39,9 @@ type
     FProfile: TConnectionProfile;
     FConn: TIBConnection;
     FTx: TSQLTransaction;
+    FRelationNames: TStringList;
+    FRelationNamesLoaded: Boolean;
+    FFieldCache: TStringList;
     function GetConnected: Boolean;
   public
     constructor Create;
@@ -50,6 +53,12 @@ type
     function ServerVersion: string;
     procedure FillFolder(ANode: TMetadataNode);
     procedure LoadChildren(ANode: TMetadataNode);
+    { Nomes de tabelas e views (cache por conexao; nao liberar). }
+    function RelationNames: TStrings;
+    { Campos de uma relacao, na ordem do catalogo (nao liberar). }
+    function RelationFields(const ARelation: string): TStrings;
+    { Descarta os caches; chamar depois de DDL que mude o catalogo. }
+    procedure ClearMetadataCache;
     property Connected: Boolean read GetConnected;
     property Profile: TConnectionProfile read FProfile;
   end;
@@ -321,11 +330,23 @@ begin
   FTx := TSQLTransaction.Create(nil);
   FConn.Transaction := FTx;
   FTx.DataBase := FConn;
+
+  FRelationNames := TStringList.Create;
+  FRelationNames.Sorted := True;
+  FRelationNames.CaseSensitive := False;
+  FRelationNames.Duplicates := dupIgnore;
+
+  FFieldCache := TStringList.Create;
+  FFieldCache.Sorted := True;
+  FFieldCache.CaseSensitive := False;
 end;
 
 destructor TIBStudioSession.Destroy;
 begin
   Disconnect;
+  ClearMetadataCache;
+  FFieldCache.Free;
+  FRelationNames.Free;
   FTx.Free;
   FConn.Free;
   FProfile.Free;
@@ -358,6 +379,7 @@ end;
 
 procedure TIBStudioSession.Disconnect;
 begin
+  ClearMetadataCache;
   if not FConn.Connected then
     Exit;
   try
@@ -511,6 +533,104 @@ begin
   finally
     Q.Free;
   end;
+end;
+
+procedure TIBStudioSession.ClearMetadataCache;
+var
+  I: Integer;
+begin
+  if Assigned(FFieldCache) then
+  begin
+    for I := 0 to FFieldCache.Count - 1 do
+      FFieldCache.Objects[I].Free;
+    FFieldCache.Clear;
+  end;
+  if Assigned(FRelationNames) then
+    FRelationNames.Clear;
+  FRelationNamesLoaded := False;
+end;
+
+function TIBStudioSession.RelationNames: TStrings;
+var
+  Q: TSQLQuery;
+begin
+  if not FRelationNamesLoaded then
+  begin
+    FRelationNames.Clear;
+    if FConn.Connected then
+    begin
+      Q := TSQLQuery.Create(nil);
+      try
+        Q.DataBase := FConn;
+        Q.Transaction := FTx;
+        Q.SQL.Text :=
+          'select trim(rdb$relation_name) as nome from rdb$relations ' +
+          'where coalesce(rdb$system_flag, 0) = 0';
+        Q.Open;
+        while not Q.EOF do
+        begin
+          FRelationNames.Add(Trim(Q.Fields[0].AsString));
+          Q.Next;
+        end;
+        Q.Close;
+      finally
+        Q.Free;
+      end;
+    end;
+    FRelationNamesLoaded := True;
+  end;
+  Result := FRelationNames;
+end;
+
+function TIBStudioSession.RelationFields(const ARelation: string): TStrings;
+var
+  Q: TSQLQuery;
+  List: TStringList;
+  Idx: Integer;
+  Rel: string;
+begin
+  Result := nil;
+  if (ARelation = '') or not FConn.Connected then
+    Exit;
+
+  { O SQL pode citar o nome em outra caixa; usa o nome exato do catalogo. }
+  Rel := ARelation;
+  Idx := RelationNames.IndexOf(ARelation);
+  if Idx >= 0 then
+    Rel := FRelationNames[Idx];
+
+  Idx := FFieldCache.IndexOf(Rel);
+  if Idx >= 0 then
+    Exit(TStrings(FFieldCache.Objects[Idx]));
+
+  List := TStringList.Create;
+  try
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text :=
+        'select trim(rf.rdb$field_name) as nome from rdb$relation_fields rf ' +
+        'where coalesce(rf.rdb$system_flag, 0) = 0 ' +
+        'and rf.rdb$relation_name = :rel order by rf.rdb$field_position';
+      Q.ParamByName('rel').AsString := Rel;
+      Q.Open;
+      while not Q.EOF do
+      begin
+        List.Add(Trim(Q.Fields[0].AsString));
+        Q.Next;
+      end;
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+  except
+    List.Free;
+    raise;
+  end;
+
+  FFieldCache.AddObject(Rel, List);
+  Result := List;
 end;
 
 end.

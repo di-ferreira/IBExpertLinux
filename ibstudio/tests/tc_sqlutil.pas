@@ -28,6 +28,22 @@ type
     procedure LeSetTerm;
   end;
 
+  TCompletionTest = class(TTestCase)
+  published
+    procedure RelacoesAposFrom;
+    procedure RelacoesComPrefixo;
+    procedure CamposAposWhere;
+    procedure CamposComAlias;
+    procedure CamposComPrefixoAposAlias;
+    procedure PalavraChaveNoInicio;
+    procedure RelacoesComJoin;
+    procedure RelacoesSeparadasPorVirgula;
+    procedure ResolveApelido;
+    procedure ResolveNomeDaPropriaTabela;
+    procedure AspasSoQuandoNecessario;
+    procedure ListaDePalavrasChave;
+  end;
+
 implementation
 
 procedure TSQLUtilTest.SeparaDoisComandos;
@@ -156,7 +172,132 @@ begin
   AssertFalse('nao e set term', TryParseSetTerm('select 1 from rdb$database', T));
 end;
 
+procedure TCompletionTest.RelacoesAposFrom;
+var
+  R: TCompletionRequest;
+begin
+  R := CompletionRequestAt('select * from ');
+  AssertEquals('contexto', Ord(ckRelation), Ord(R.Kind));
+  AssertEquals('prefixo', '', R.Prefix);
+end;
+
+procedure TCompletionTest.RelacoesComPrefixo;
+var
+  R: TCompletionRequest;
+begin
+  R := CompletionRequestAt('select * from cli');
+  AssertEquals('contexto', Ord(ckRelation), Ord(R.Kind));
+  AssertEquals('prefixo', 'cli', R.Prefix);
+end;
+
+procedure TCompletionTest.CamposAposWhere;
+var
+  R: TCompletionRequest;
+begin
+  R := CompletionRequestAt('select * from clientes where ');
+  AssertEquals('contexto', Ord(ckField), Ord(R.Kind));
+end;
+
+procedure TCompletionTest.CamposComAlias;
+var
+  R: TCompletionRequest;
+begin
+  R := CompletionRequestAt('select * from clientes c where c.');
+  AssertEquals('contexto', Ord(ckField), Ord(R.Kind));
+  AssertEquals('qualificador', 'c', R.Qualifier);
+  AssertEquals('prefixo', '', R.Prefix);
+end;
+
+procedure TCompletionTest.CamposComPrefixoAposAlias;
+var
+  R: TCompletionRequest;
+begin
+  R := CompletionRequestAt('select * from clientes c where c.no');
+  AssertEquals('contexto', Ord(ckField), Ord(R.Kind));
+  AssertEquals('qualificador', 'c', R.Qualifier);
+  AssertEquals('prefixo', 'no', R.Prefix);
+end;
+
+procedure TCompletionTest.PalavraChaveNoInicio;
+var
+  R: TCompletionRequest;
+begin
+  R := CompletionRequestAt('sel');
+  AssertEquals('contexto', Ord(ckKeyword), Ord(R.Kind));
+  AssertEquals('prefixo', 'sel', R.Prefix);
+end;
+
+procedure TCompletionTest.RelacoesComJoin;
+var
+  S: TStringArray;
+begin
+  S := ReferencedRelations(
+    'select * from clientes c join pedidos p on p.cliente_id = c.id where ');
+  AssertEquals('quantidade', 2, Length(S));
+  AssertEquals('primeira', 'clientes', S[0]);
+  AssertEquals('segunda', 'pedidos', S[1]);
+end;
+
+procedure TCompletionTest.RelacoesSeparadasPorVirgula;
+var
+  S: TStringArray;
+begin
+  S := ReferencedRelations('select * from clientes, pedidos where ativo = 1');
+  AssertEquals('quantidade', 2, Length(S));
+  AssertEquals('primeira', 'clientes', S[0]);
+  AssertEquals('segunda', 'pedidos', S[1]);
+end;
+
+procedure TCompletionTest.ResolveApelido;
+begin
+  AssertEquals('apelido', 'clientes',
+    ResolveRelationQualifier('select * from clientes c where c.id = 1', 'c'));
+  AssertEquals('desconhecido', '',
+    ResolveRelationQualifier('select * from clientes c', 'x'));
+end;
+
+procedure TCompletionTest.ResolveNomeDaPropriaTabela;
+begin
+  AssertEquals('tabela', 'clientes',
+    ResolveRelationQualifier('select * from clientes', 'clientes'));
+  AssertEquals('caixa diferente', 'clientes',
+    ResolveRelationQualifier('select * from clientes', 'CLIENTES'));
+end;
+
+procedure TCompletionTest.AspasSoQuandoNecessario;
+begin
+  AssertEquals('maiusculo', 'CLIENTES', QuoteIdentifier('CLIENTES'));
+  AssertEquals('minusculo vira aspas', '"clientes"', QuoteIdentifier('clientes'));
+  AssertEquals('espaco', '"meu cadastro"', QuoteIdentifier('meu cadastro'));
+  AssertEquals('palavra reservada', '"SELECT"', QuoteIdentifier('SELECT'));
+  AssertEquals('aspas internas', '"a""b"', QuoteIdentifier('a"b'));
+end;
+
+procedure TCompletionTest.ListaDePalavrasChave;
+var
+  K, F: TStringArray;
+  I: Integer;
+  HasSelect, HasCount: Boolean;
+begin
+  K := SqlKeywords;
+  F := SqlFunctions;
+  AssertTrue('lista nao vazia', Length(K) > 100);
+  HasSelect := False;
+  for I := 0 to High(K) do
+    if K[I] = 'SELECT' then
+      HasSelect := True;
+  HasCount := False;
+  for I := 0 to High(F) do
+    if F[I] = 'COUNT' then
+      HasCount := True;
+  AssertTrue('SELECT', HasSelect);
+  AssertTrue('COUNT', HasCount);
+  AssertTrue('detecta palavra reservada', IsSqlKeyword('select'));
+  AssertFalse('nao e palavra reservada', IsSqlKeyword('clientes'));
+end;
+
 initialization
   RegisterTest(TSQLUtilTest);
+  RegisterTest(TCompletionTest);
 
 end.

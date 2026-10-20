@@ -17,6 +17,15 @@ contém código do IBExpert.
   de linha e de bloco), resultado em grade e mensagens por comando.
 - **Execução em thread**: a interface não congela; cada execução abre a própria
   conexão e materializa o resultado em um `TBufDataset` entregue à grade.
+- **Autocompletar (Code Insight)**: após `FROM`/`JOIN`/`INTO`/`UPDATE` lista
+  tabelas e views; após `SELECT`/`WHERE`/`ON`/`ORDER BY`/`GROUP BY` e depois de
+  `alias.` lista os campos das tabelas do comando; no início do comando lista
+  palavras-chave e funções do Firebird. Abre com `Ctrl+Espaço`, pelo menu
+  *Consulta > Completar código* ou automaticamente ao digitar o ponto depois de
+  um apelido. Uma tabela digitada em minúsculas é reconhecida pelo catálogo.
+- **Duplo clique na tabela/view** abre uma aba já executando
+  `select first 100 * from <tabela>` e mostra os dados na grade (mesmo caminho
+  do comando *Abrir dados* no menu de contexto da árvore).
 - **Ajustes persistentes** (host, porta, banco, usuário, charset, dialeto) em
   arquivo INI — a senha nunca é gravada.
 
@@ -24,6 +33,7 @@ contém código do IBExpert.
 
 Edição na grade, editores de DDL (tabela/procedure/trigger), comparação de
 bancos, backup/restore, depurador de procedures, monitor e recursos de IA.
+O catálogo completo do que o IBExpert faz está em `recon/FUNCIONALIDADES.md`.
 
 ## Estrutura
 

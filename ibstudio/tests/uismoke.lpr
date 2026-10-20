@@ -56,7 +56,7 @@ var
   Profile: TConnectionProfile;
   Tab: TSqlTabFrame;
   Wait, I: Integer;
-  Folder: TTreeNode;
+  Folder, TableNode: TTreeNode;
   Allow, FoundTable: Boolean;
 begin
   if ParamCount < 5 then
@@ -94,11 +94,37 @@ begin
       Form.Tree.OnExpanding(Form.Tree, Folder, Allow);
       Check('expansao permitida', Allow);
       FoundTable := False;
+      TableNode := nil;
       for I := 0 to Folder.Count - 1 do
         if SameText(Folder.Items[I].Text, 'TESTE_IBSTUDIO') then
+        begin
           FoundTable := True;
+          TableNode := Folder.Items[I];
+        end;
       Check('tabela listada na arvore', FoundTable,
         Format('(%d filhos)', [Folder.Count]));
+
+      { Duplo clique na tabela: abre uma aba e executa o select. }
+      if Assigned(TableNode) then
+      begin
+        WriteLn('--- duplo clique na tabela ---');
+        Form.Tree.Selected := TableNode;
+        Form.Tree.OnDblClick(Form.Tree);
+        Tab := Form.ActiveTab;
+        Wait := 0;
+        while Assigned(Tab) and Tab.Busy and (Wait < 200) do
+        begin
+          PumpFor(50);
+          Inc(Wait);
+        end;
+        Check('aba de dados aberta', Assigned(Tab));
+        Check('titulo da aba e a tabela',
+          Assigned(Tab) and SameText(Form.Tabs.ActivePage.Caption, 'TESTE_IBSTUDIO'),
+          Format('(%s)', [Form.Tabs.ActivePage.Caption]));
+        Check('tabela aberta com 3 linhas',
+          Assigned(Tab) and (Tab.ResultRowCount = 3),
+          Format('(%d)', [Tab.ResultRowCount]));
+      end;
     end;
 
     WriteLn('--- execucao pela aba SQL ---');

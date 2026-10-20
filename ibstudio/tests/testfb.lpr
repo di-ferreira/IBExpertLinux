@@ -99,6 +99,7 @@ procedure TestSession(AProfile: TConnectionProfile);
 var
   S: TIBStudioSession;
   Folder, TableNode: TMetadataNode;
+  Fields: TStrings;
   I: Integer;
   Found: Boolean;
 begin
@@ -135,6 +136,16 @@ begin
     finally
       Folder.Free;
     end;
+
+    { Cache usado pelo autocompletar. }
+    Check('cache lista TESTE_IBSTUDIO',
+      S.RelationNames.IndexOf('TESTE_IBSTUDIO') >= 0,
+      Format('(%d relacoes)', [S.RelationNames.Count]));
+    Fields := S.RelationFields('teste_ibstudio');
+    Check('cache de campos (nome em minusculas)', Assigned(Fields) and (Fields.Count = 6),
+      Format('(%d)', [Fields.Count]));
+    if Assigned(Fields) and (Fields.Count > 0) then
+      WriteLn('    campos: ', Fields.CommaText);
   finally
     S.Free;
   end;
