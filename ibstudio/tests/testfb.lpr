@@ -11,7 +11,8 @@ program testfb;
 
 uses
   SysUtils, Classes, DB, sqldb, IBConnection, bufdataset,
-  ibtypes, ibsqlutil, ibmetadata, ibdml, ibcsv, ibddl, ibcode, ibsession;
+  ibtypes, ibsqlutil, ibmetadata, ibdml, ibcsv, ibddl, ibcode, ibtools,
+  ibsession;
 
 var
   Failures: Integer = 0;
@@ -654,6 +655,76 @@ begin
   end;
 end;
 
+procedure TestAdminTools(AProfile: TConnectionProfile);
+var
+  Exe: string;
+  Args: TStringArray;
+  Res: TToolResult;
+  O: TToolOptions;
+  BkFile, NewDb: string;
+  Target: TConnectionProfile;
+begin
+  WriteLn('--- ferramentas administrativas ---');
+  Exe := FindFirebirdTool('gbak');
+  if Exe = '' then
+  begin
+    WriteLn('  (gbak nao encontrado: teste ignorado)');
+    Exit;
+  end;
+
+  BkFile := IncludeTrailingPathDelimiter(GetTempDir) + 'ibstudio-backup.fbk';
+  NewDb := IncludeTrailingPathDelimiter(GetTempDir) + 'ibstudio-restored.fdb';
+  DeleteFile(BkFile);
+  DeleteFile(NewDb);
+
+  { Backup. }
+  O := Default(TToolOptions);
+  O.Verbose := True;
+  Args := BuildBackupArgs(AProfile, BkFile, O);
+  Res := RunTool(Exe, Args, AProfile.User, AProfile.Password);
+  try
+    Check('backup executado', Res.ExitCode = 0, Res.Output.Text);
+    Check('arquivo de backup criado', FileExists(BkFile));
+  finally
+    Res.Free;
+  end;
+
+  { Restore em um banco novo. }
+  Target := AProfile.Clone;
+  try
+    Target.Database := NewDb;
+    O.ReplaceExisting := True;
+    Args := BuildRestoreArgs(Target, BkFile, O);
+    Res := RunTool(Exe, Args, Target.User, Target.Password);
+    try
+      Check('restore executado', Res.ExitCode = 0, Res.Output.Text);
+      Check('banco restaurado', FileExists(NewDb));
+    finally
+      Res.Free;
+    end;
+
+    { Validacao com gfix. }
+    Exe := FindFirebirdTool('gfix');
+    if Exe <> '' then
+    begin
+      Args := BuildValidateArgs(Target, Default(TToolOptions));
+      Res := RunTool(Exe, Args, Target.User, Target.Password);
+      try
+        Check('validacao concluida', Res.ExitCode = 0, Res.Output.Text);
+      finally
+        Res.Free;
+      end;
+    end;
+  finally
+    Target.Free;
+  end;
+
+  DeleteFile(BkFile);
+  { O servidor cria o banco restaurado com o dono dele: a remocao pode
+    falhar; o proximo restore usa a opcao de substituicao. }
+  DeleteFile(NewDb);
+end;
+
 var
   Mode, Host, Port, DBFile, User, Pass: string;
   Profile: TConnectionProfile;
@@ -682,6 +753,7 @@ begin
       TestCsvImport(Profile);
       TestTableEditor(Profile);
       TestCodeEditor(Profile);
+      TestAdminTools(Profile);
     except
       on E: Exception do
       begin

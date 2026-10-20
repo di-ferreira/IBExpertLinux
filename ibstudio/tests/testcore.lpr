@@ -5,7 +5,7 @@ program testcore;
 
 uses
   Classes, consoletestrunner, testregistry, tc_sqlutil, tc_metadata,
-  tc_settings, tc_dml, tc_csv, tc_ddl, tc_code;
+  tc_settings, tc_dml, tc_csv, tc_ddl, tc_code, tc_tools;
 
 var
   Runner: TTestRunner;

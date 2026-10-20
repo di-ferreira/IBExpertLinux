@@ -10,7 +10,7 @@ uses
   Graphics, Dialogs, LCLType,
   ibtypes, ibsqlutil, ibmetadata, ibsettings, ibcsv, ibddl, ibcode, ibsession,
   uConnect, uSqlTab, uSqlPreview, uCsvOptions, uImportCsv, uTableEditor,
-  uCodeEditor;
+  uCodeEditor, uAdmin;
 
 type
   TfrmMain = class(TForm)
@@ -44,6 +44,7 @@ type
     procedure MenuExportCsvClick(Sender: TObject);
     procedure MenuImportCsvClick(Sender: TObject);
     procedure MenuNewTableClick(Sender: TObject);
+    procedure MenuAdminClick(Sender: TObject);
     procedure EditStructureClick(Sender: TObject);
     procedure EditCodeClick(Sender: TObject);
     procedure NewCodeClick(Sender: TObject);
@@ -123,7 +124,7 @@ var
   LeftPanel: TPanel;
   Splitter: TSplitter;
   Main: TMainMenu;
-  MFile, MQuery, MFerramentas, MBanco, MHelp, Item: TMenuItem;
+  MFile, MQuery, MFerramentas, MBanco, MServicos, MHelp, Item: TMenuItem;
 begin
   Caption := 'IBStudio';
   Width := 1100;
@@ -198,6 +199,34 @@ begin
   Item.Caption := 'Nova tabela...';
   Item.OnClick := @MenuNewTableClick;
   MBanco.Add(Item);
+
+  MServicos := TMenuItem.Create(Main);
+  MServicos.Caption := '&Servicos';
+  Main.Items.Add(MServicos);
+
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Backup...';
+  Item.Tag := Ord(atBackup);
+  Item.OnClick := @MenuAdminClick;
+  MServicos.Add(Item);
+
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Restaurar...';
+  Item.Tag := Ord(atRestore);
+  Item.OnClick := @MenuAdminClick;
+  MServicos.Add(Item);
+
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Validacao do banco...';
+  Item.Tag := Ord(atValidate);
+  Item.OnClick := @MenuAdminClick;
+  MServicos.Add(Item);
+
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Estatisticas do banco...';
+  Item.Tag := Ord(atStats);
+  Item.OnClick := @MenuAdminClick;
+  MServicos.Add(Item);
 
   MFerramentas := TMenuItem.Create(Main);
   MFerramentas.Caption := '&Ferramentas';
@@ -736,6 +765,27 @@ begin
   Dlg := TfrmImportCsv.Create(Self);
   try
     Dlg.SetSession(FSession);
+    Dlg.ShowModal;
+  finally
+    Dlg.Free;
+  end;
+end;
+
+procedure TfrmMain.MenuAdminClick(Sender: TObject);
+var
+  Dlg: TfrmAdmin;
+begin
+  if not FSession.Connected then
+  begin
+    MessageDlg('Sem conexao', 'Conecte-se a um banco antes de usar as tarefas ' +
+      'administrativas.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+
+  Dlg := TfrmAdmin.Create(Self);
+  try
+    Dlg.SetSession(FSession);
+    Dlg.SetTask(TAdminTask(TMenuItem(Sender).Tag));
     Dlg.ShowModal;
   finally
     Dlg.Free;

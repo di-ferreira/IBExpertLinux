@@ -11,7 +11,7 @@ uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
   Interfaces, Forms, SysUtils, Classes, Controls, ComCtrls, ExtCtrls, DB, sqldb,
   ibtypes, ibsession, ibcsv, ibddl, ibcode, uMain, uSqlTab, uSqlPreview,
-  uEditRecord, uTableEditor, uCodeEditor;
+  uEditRecord, uTableEditor, uCodeEditor, uAdmin;
 
 var
   Failures: Integer = 0;
@@ -95,6 +95,7 @@ var
   DlgTable: TfrmTableEditor;
   M: TTableModel;
   Frame: TCodeEditorFrame;
+  DlgAdmin: TfrmAdmin;
   Obj: TCodeObject;
   Err: string;
   Wait, I: Integer;
@@ -297,6 +298,22 @@ begin
         Sess.ExecuteStatement(DropObjectSQL(ckProcedure, 'PROC_TESTE'), Err);
       finally
         Frame.Free;
+      end;
+    finally
+      Sess.Free;
+    end;
+
+    WriteLn('--- tarefas administrativas ---');
+    Sess := TIBStudioSession.Create;
+    try
+      Sess.Connect(Profile);
+      DlgAdmin := TfrmAdmin.Create(nil);
+      try
+        DlgAdmin.SetSession(Sess);
+        DlgAdmin.SetTask(atBackup);
+        Check('dialogo administrativo criado', DlgAdmin.Visible = False);
+      finally
+        DlgAdmin.Free;
       end;
     finally
       Sess.Free;
