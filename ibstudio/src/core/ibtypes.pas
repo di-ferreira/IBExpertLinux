@@ -38,6 +38,8 @@ type
   public
     constructor Create;
     function Clone: TConnectionProfile;
+    { Copia os valores de outro perfil (a senha incluida). }
+    procedure CopyFrom(const AProfile: TConnectionProfile);
     function DisplayName: string;
     property Host: string read FHost write FHost;
     property Port: Integer read FPort write FPort;
@@ -155,6 +157,19 @@ begin
   Result.Password := FPassword;
   Result.Charset := FCharset;
   Result.Dialect := FDialect;
+end;
+
+procedure TConnectionProfile.CopyFrom(const AProfile: TConnectionProfile);
+begin
+  if (AProfile = nil) or (AProfile = Self) then
+    Exit;
+  FHost := AProfile.Host;
+  FPort := AProfile.Port;
+  FDatabase := AProfile.Database;
+  FUser := AProfile.User;
+  FPassword := AProfile.Password;
+  FCharset := AProfile.Charset;
+  FDialect := AProfile.Dialect;
 end;
 
 function TConnectionProfile.DisplayName: string;

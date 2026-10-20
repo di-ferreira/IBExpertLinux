@@ -56,7 +56,9 @@ type
     { Sessao usada apenas para metadados do autocompletar (nao e owned). }
     procedure SetSession(ASession: TIBStudioSession);
     procedure SetSqlText(const ASQL: string);
+    function GetSqlText: string;
     procedure ExecuteScript;
+    property SqlText: string read GetSqlText;
     procedure FocusEditor;
     { Abre a lista de completar no cursor (Ctrl+Espaco). }
     procedure ShowCompletion;
@@ -359,7 +361,7 @@ end;
 
 procedure TSqlTabFrame.CompletionExecute(Sender: TObject);
 var
-  SQLText: string;
+  Contexto: string;
   Req: TCompletionRequest;
   Relations: TStringArray;
   Rel: string;
@@ -369,8 +371,8 @@ begin
   try
     FCompletion.ItemList.Clear;
     try
-      SQLText := TextUpToCaret;
-      Req := CompletionRequestAt(SQLText);
+      Contexto := TextUpToCaret;
+      Req := CompletionRequestAt(Contexto);
       case Req.Kind of
         ckRelation:
           begin
@@ -382,7 +384,7 @@ begin
           begin
             if Req.Qualifier <> '' then
             begin
-              Rel := ResolveRelationQualifier(SQLText, Req.Qualifier);
+              Rel := ResolveRelationQualifier(Contexto, Req.Qualifier);
               if Rel <> '' then
                 AddFieldsOf(Rel)
               else
@@ -390,7 +392,7 @@ begin
             end
             else
             begin
-              Relations := ReferencedRelations(SQLText);
+              Relations := ReferencedRelations(Contexto);
               for I := 0 to High(Relations) do
                 AddFieldsOf(Relations[I]);
             end;
@@ -487,6 +489,11 @@ begin
   FEditor.Lines.Text := ASQL;
   FEditor.CaretX := 1;
   FEditor.CaretY := 1;
+end;
+
+function TSqlTabFrame.GetSqlText: string;
+begin
+  Result := FEditor.Lines.Text;
 end;
 
 function TSqlTabFrame.ScriptTitle: string;

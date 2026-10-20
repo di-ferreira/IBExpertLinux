@@ -4,7 +4,8 @@ program testcore;
 {$mode objfpc}{$H+}
 
 uses
-  Classes, consoletestrunner, testregistry, tc_sqlutil, tc_metadata;
+  Classes, consoletestrunner, testregistry, tc_sqlutil, tc_metadata,
+  tc_settings;
 
 var
   Runner: TTestRunner;

@@ -7,8 +7,9 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, StdCtrls, ExtCtrls, ComCtrls, Menus,
-  Graphics, Dialogs, IniFiles, LCLType,
-  ibtypes, ibsqlutil, ibmetadata, ibsession, uConnect, uSqlTab;
+  Graphics, Dialogs, LCLType,
+  ibtypes, ibsqlutil, ibmetadata, ibsettings, ibsession, uConnect, uSqlTab,
+  uSqlPreview;
 
 type
   TfrmMain = class(TForm)
@@ -17,7 +18,7 @@ type
     FTree: TTreeView;
     FTabs: TPageControl;
     FStatus: TStatusBar;
-    FProfile: TConnectionProfile;
+    FSettings: TStudioSettings;
     FLblConn: TLabel;
     FNewTabBtn: TButton;
     FCloseTabBtn: TButton;
@@ -34,6 +35,7 @@ type
     procedure CloseTabClick(Sender: TObject);
     procedure RunClick(Sender: TObject);
     procedure CompleteClick(Sender: TObject);
+    procedure MenuPreviewClick(Sender: TObject);
     procedure MenuExitClick(Sender: TObject);
     procedure MenuAboutClick(Sender: TObject);
     procedure TreeExpanding(Sender: TObject; Node: TTreeNode; var AllowChange: Boolean);
@@ -52,7 +54,6 @@ type
     procedure FillTreeNode(ATreeItem: TTreeNode; AMeta: TMetadataNode);
     procedure UpdateStatus;
     function NewSqlTab(const ASQL: string; const ATitle: string = ''): TSqlTabFrame;
-    procedure LoadSettings;
     procedure SaveSettings;
     function SettingsFile: string;
   public
@@ -79,16 +80,16 @@ constructor TfrmMain.Create(AOwner: TComponent);
 begin
   inherited CreateNew(AOwner);
   FSession := TIBStudioSession.Create;
-  FProfile := TConnectionProfile.Create;
+  FSettings := TStudioSettings.Create(SettingsFile);
+  FSettings.Load;
   BuildUi;
-  LoadSettings;
   UpdateStatus;
 end;
 
 destructor TfrmMain.Destroy;
 begin
   FSession.Free;
-  FProfile.Free;
+  FSettings.Free;
   inherited Destroy;
 end;
 
@@ -97,41 +98,9 @@ begin
   Result := GetAppConfigFile(False);
 end;
 
-procedure TfrmMain.LoadSettings;
-var
-  Ini: TIniFile;
-begin
-  if not FileExists(SettingsFile) then
-    Exit;
-  Ini := TIniFile.Create(SettingsFile);
-  try
-    FProfile.Host := Ini.ReadString('ultima', 'host', FProfile.Host);
-    FProfile.Port := Ini.ReadInteger('ultima', 'porta', FProfile.Port);
-    FProfile.Database := Ini.ReadString('ultima', 'banco', FProfile.Database);
-    FProfile.User := Ini.ReadString('ultima', 'usuario', FProfile.User);
-    FProfile.Charset := Ini.ReadString('ultima', 'charset', FProfile.Charset);
-    FProfile.Dialect := Ini.ReadInteger('ultima', 'dialeto', FProfile.Dialect);
-  finally
-    Ini.Free;
-  end;
-end;
-
 procedure TfrmMain.SaveSettings;
-var
-  Ini: TIniFile;
 begin
-  ForceDirectories(ExtractFileDir(SettingsFile));
-  Ini := TIniFile.Create(SettingsFile);
-  try
-    Ini.WriteString('ultima', 'host', FProfile.Host);
-    Ini.WriteInteger('ultima', 'porta', FProfile.Port);
-    Ini.WriteString('ultima', 'banco', FProfile.Database);
-    Ini.WriteString('ultima', 'usuario', FProfile.User);
-    Ini.WriteString('ultima', 'charset', FProfile.Charset);
-    Ini.WriteInteger('ultima', 'dialeto', FProfile.Dialect);
-  finally
-    Ini.Free;
-  end;
+  FSettings.Save;
 end;
 
 procedure TfrmMain.BuildUi;
@@ -140,7 +109,7 @@ var
   LeftPanel: TPanel;
   Splitter: TSplitter;
   Main: TMainMenu;
-  MFile, MQuery, MHelp, Item: TMenuItem;
+  MFile, MQuery, MFerramentas, MHelp, Item: TMenuItem;
 begin
   Caption := 'IBStudio';
   Width := 1100;
@@ -194,6 +163,15 @@ begin
   Item.Caption := 'Fechar aba';
   Item.OnClick := @CloseTabClick;
   MQuery.Add(Item);
+
+  MFerramentas := TMenuItem.Create(Main);
+  MFerramentas.Caption := '&Ferramentas';
+  Main.Items.Add(MFerramentas);
+
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Prévia de SQL...';
+  Item.OnClick := @MenuPreviewClick;
+  MFerramentas.Add(Item);
 
   MHelp := TMenuItem.Create(Main);
   MHelp.Caption := 'A&juda';
@@ -314,10 +292,10 @@ begin
   if FSession.Connected then
   begin
     FStatus.SimpleText := Format('Conectado: %s | usuario %s | charset %s',
-      [FProfile.DisplayName, FProfile.User, FProfile.Charset]);
+      [FSettings.Profile.DisplayName, FSettings.Profile.User, FSettings.Profile.Charset]);
     if FSession.ServerVersion <> '' then
       FStatus.SimpleText := FStatus.SimpleText + ' | Firebird ' + FSession.ServerVersion;
-    FLblConn.Caption := 'conectado: ' + FProfile.Database;
+    FLblConn.Caption := 'conectado: ' + FSettings.Profile.Database;
     FLblConn.Font.Color := clGreen;
   end
   else
@@ -336,7 +314,7 @@ begin
   Dlg := TfrmConnect.Create(Self);
   try
     { Preenche com a ultima conexao usada. }
-    Dlg.SetInitialProfile(FProfile);
+    Dlg.SetInitialProfile(FSettings.Profile);
     if Dlg.ShowModal = mrOk then
     begin
       P := Dlg.Profile.Clone;
@@ -359,14 +337,13 @@ begin
     FSession.Disconnect;
   try
     FSession.Connect(AProfile);
-    FProfile.Free;
-    FProfile := AProfile.Clone;
+    FSettings.Profile.CopyFrom(AProfile);
     SaveSettings;
     PopulateTree;
     UpdateStatus;
     for I := 0 to FTabs.PageCount - 1 do
       if FTabs.Pages[I].ControlCount > 0 then
-        TSqlTabFrame(FTabs.Pages[I].Controls[0]).SetProfile(FProfile);
+        TSqlTabFrame(FTabs.Pages[I].Controls[0]).SetProfile(FSettings.Profile);
   except
     on E: Exception do
     begin
@@ -404,7 +381,7 @@ begin
     if not FSession.Connected then
       Exit;
 
-    MetaRoot := TMetadataNode.Create(mkFolder, FProfile.Database, '');
+    MetaRoot := TMetadataNode.Create(mkFolder, FSettings.Profile.Database, '');
     Specs := FolderSpecs;
     for I := 0 to High(Specs) do
     begin
@@ -413,7 +390,7 @@ begin
       MetaRoot.Children.Add(FolderMeta);
     end;
 
-    Root := FTree.Items.Add(nil, FProfile.Database);
+    Root := FTree.Items.Add(nil, FSettings.Profile.Database);
     Root.Data := MetaRoot;
     Root.HasChildren := True;
 
@@ -597,7 +574,7 @@ begin
   Result.Align := alClient;
   Result.SetSession(FSession);
   if FSession.Connected then
-    Result.SetProfile(FProfile);
+    Result.SetProfile(FSettings.Profile);
   if ASQL <> '' then
     Result.SetSqlText(ASQL);
   FTabs.ActivePage := Sheet;
@@ -634,6 +611,15 @@ begin
   Tab := ActiveTab;
   if Assigned(Tab) then
     Tab.ShowCompletion;
+end;
+
+procedure TfrmMain.MenuPreviewClick(Sender: TObject);
+var
+  Tab: TSqlTabFrame;
+begin
+  Tab := ActiveTab;
+  if Assigned(Tab) then
+    ShowSqlPreview('Prévia de SQL', Tab.SqlText);
 end;
 
 procedure TfrmMain.MenuExitClick(Sender: TObject);

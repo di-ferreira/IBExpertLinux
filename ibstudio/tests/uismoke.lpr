@@ -10,7 +10,7 @@ program uismoke;
 uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
   Interfaces, Forms, SysUtils, Controls, ComCtrls, ExtCtrls,
-  ibtypes, ibsession, uMain, uSqlTab;
+  ibtypes, ibsession, uMain, uSqlTab, uSqlPreview;
 
 var
   Failures: Integer = 0;
@@ -55,6 +55,7 @@ var
   Form: TfrmMain;
   Profile: TConnectionProfile;
   Tab: TSqlTabFrame;
+  Preview: TfrmSqlPreview;
   Wait, I: Integer;
   Folder, TableNode: TTreeNode;
   Allow, FoundTable: Boolean;
@@ -125,6 +126,17 @@ begin
           Assigned(Tab) and (Tab.ResultRowCount = 3),
           Format('(%d)', [Tab.ResultRowCount]));
       end;
+    end;
+
+    WriteLn('--- previa de SQL ---');
+    Preview := TfrmSqlPreview.Create(nil);
+    try
+      Preview.SetSql('select id, nome from teste_ibstudio');
+      Check('previa mostra o script',
+        Trim(Preview.SqlText) = 'select id, nome from teste_ibstudio',
+        Preview.SqlText);
+    finally
+      Preview.Free;
     end;
 
     WriteLn('--- execucao pela aba SQL ---');

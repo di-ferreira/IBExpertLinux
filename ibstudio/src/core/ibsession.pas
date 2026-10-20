@@ -30,7 +30,14 @@ type
     procedure Close;
     { Executa um comando. Quando devolve linhas, materializa em ADest. }
     function ExecuteOne(const AStatement: TStatement; ADest: TBufDataset): TExecOutcome;
+    { Executa DML/DDL com parametros nomeados. ACommit=False deixa a
+      transacao aberta para Commit/Rollback posteriores. }
+    function ExecuteParams(const ASQL: string; AParams: TParams;
+      ACommit: Boolean = True): Int64;
+    procedure Commit;
+    procedure Rollback;
     property Connection: TIBConnection read FConn;
+    property Transaction: TSQLTransaction read FTx;
   end;
 
   { Sessao de apoio da UI: metadados e consultas curtas. }
@@ -51,6 +58,11 @@ type
     { Cria um banco novo no servidor. }
     procedure CreateDatabase(const AProfile: TConnectionProfile);
     function ServerVersion: string;
+    { Executa um comando curto na conexao da UI. }
+    function Execute(const ASQL: string; AParams: TParams = nil;
+      ACommit: Boolean = True): Int64;
+    procedure Commit;
+    procedure Rollback;
     procedure FillFolder(ANode: TMetadataNode);
     procedure LoadChildren(ANode: TMetadataNode);
     { Nomes de tabelas e views (cache por conexao; nao liberar). }
@@ -61,6 +73,8 @@ type
     procedure ClearMetadataCache;
     property Connected: Boolean read GetConnected;
     property Profile: TConnectionProfile read FProfile;
+    property Connection: TIBConnection read FConn;
+    property Transaction: TSQLTransaction read FTx;
   end;
 
 function DescribeException(E: Exception): string;
@@ -207,6 +221,46 @@ end;
 
 { TIBExecutor }
 
+{ Executa um comando com parametros nomeados em uma conexao/transacao.
+  Em erro, desfaz a transacao corrente e repassa a mensagem do servidor. }
+function RunParams(AConn: TIBConnection; ATx: TSQLTransaction;
+  const ASQL: string; AParams: TParams; ACommit: Boolean): Int64;
+var
+  Q: TSQLQuery;
+begin
+  Q := TSQLQuery.Create(nil);
+  try
+    Q.DataBase := AConn;
+    Q.Transaction := ATx;
+    Q.SQL.Text := ASQL;
+    if Assigned(AParams) then
+      Q.Params.Assign(AParams);
+    try
+      Q.ExecSQL;
+      Result := Q.RowsAffected;
+      if ACommit and ATx.Active then
+      begin
+        ATx.Commit;
+        ATx.StartTransaction;
+      end;
+    except
+      on E: Exception do
+      begin
+        try
+          if ATx.Active then
+            ATx.Rollback;
+          ATx.StartTransaction;
+        except
+          { Mantem o erro original. }
+        end;
+        raise Exception.Create(DescribeException(E));
+      end;
+    end;
+  finally
+    Q.Free;
+  end;
+end;
+
 constructor TIBExecutor.Create(const AProfile: TConnectionProfile; AMaxRows: Integer);
 begin
   inherited Create;
@@ -318,6 +372,26 @@ begin
   end;
 
   Result.ElapsedMs := Int64(GetTickCount64 - Start);
+end;
+
+function TIBExecutor.ExecuteParams(const ASQL: string; AParams: TParams;
+  ACommit: Boolean): Int64;
+begin
+  Result := RunParams(FConn, FTx, ASQL, AParams, ACommit);
+end;
+
+procedure TIBExecutor.Commit;
+begin
+  if FTx.Active then
+    FTx.Commit;
+  FTx.StartTransaction;
+end;
+
+procedure TIBExecutor.Rollback;
+begin
+  if FTx.Active then
+    FTx.Rollback;
+  FTx.StartTransaction;
 end;
 
 { TIBStudioSession }
@@ -445,6 +519,26 @@ begin
   finally
     Q.Free;
   end;
+end;
+
+function TIBStudioSession.Execute(const ASQL: string; AParams: TParams;
+  ACommit: Boolean): Int64;
+begin
+  Result := RunParams(FConn, FTx, ASQL, AParams, ACommit);
+end;
+
+procedure TIBStudioSession.Commit;
+begin
+  if FTx.Active then
+    FTx.Commit;
+  FTx.StartTransaction;
+end;
+
+procedure TIBStudioSession.Rollback;
+begin
+  if FTx.Active then
+    FTx.Rollback;
+  FTx.StartTransaction;
 end;
 
 procedure TIBStudioSession.FillFolder(ANode: TMetadataNode);

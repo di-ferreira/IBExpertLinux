@@ -233,6 +233,72 @@ begin
   end;
 end;
 
+function CountId99(AConn: TIBConnection; ATx: TSQLTransaction): Integer;
+var
+  Q: TSQLQuery;
+begin
+  Q := TSQLQuery.Create(nil);
+  try
+    Q.DataBase := AConn;
+    Q.Transaction := ATx;
+    Q.SQL.Text := 'select count(*) as n from teste_ibstudio where id = 99';
+    Q.Open;
+    Result := Q.Fields[0].AsInteger;
+    Q.Close;
+  finally
+    Q.Free;
+  end;
+end;
+
+procedure TestExecuteParams(AProfile: TConnectionProfile);
+var
+  Exec: TIBExecutor;
+  Params: TParams;
+  N: Int64;
+begin
+  WriteLn('--- execucao parametrizada ---');
+  Exec := TIBExecutor.Create(AProfile, 100);
+  try
+    Exec.Open;
+
+    Params := TParams.Create(nil);
+    try
+      Params.CreateParam(ftInteger, 'id', ptInput);
+      Params.CreateParam(ftString, 'nome', ptInput);
+      Params.ParamByName('id').AsInteger := 99;
+      Params.ParamByName('nome').AsString := 'Parametro';
+      N := Exec.ExecuteParams(
+        'insert into teste_ibstudio (id, nome) values (:id, :nome)', Params, False);
+      Check('insert parametrizado afetou 1 linha', N = 1, Format('(%d)', [N]));
+    finally
+      Params.Free;
+    end;
+
+    Exec.Rollback;
+    Check('rollback desfez o insert',
+      CountId99(Exec.Connection, Exec.Transaction) = 0);
+
+    Params := TParams.Create(nil);
+    try
+      Params.CreateParam(ftInteger, 'id', ptInput);
+      Params.CreateParam(ftString, 'nome', ptInput);
+      Params.ParamByName('id').AsInteger := 99;
+      Params.ParamByName('nome').AsString := 'Parametro';
+      Exec.ExecuteParams(
+        'insert into teste_ibstudio (id, nome) values (:id, :nome)', Params, True);
+    finally
+      Params.Free;
+    end;
+    Check('commit manteve o insert',
+      CountId99(Exec.Connection, Exec.Transaction) = 1);
+
+    Check('delete parametrizado',
+      Exec.ExecuteParams('delete from teste_ibstudio where id = 99', nil, True) = 1);
+  finally
+    Exec.Free;
+  end;
+end;
+
 var
   Mode, Host, Port, DBFile, User, Pass: string;
   Profile: TConnectionProfile;
@@ -256,6 +322,7 @@ begin
         CreateDatabase(Profile);
       TestSession(Profile);
       TestExecutor(Profile);
+      TestExecuteParams(Profile);
     except
       on E: Exception do
       begin
