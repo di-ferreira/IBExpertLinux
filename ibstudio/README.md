@@ -35,6 +35,9 @@ Edição na grade, editores de DDL (tabela/procedure/trigger), comparação de
 bancos, backup/restore, depurador de procedures, monitor e recursos de IA.
 O catálogo completo do que o IBExpert faz está em `recon/FUNCIONALIDADES.md`.
 
+O plano de implementação da v2 está em `docs/plano/`: visão geral por fases
+(`00-plano-geral.md`), uma spec por fase, e o andamento em `PROGRESSO.md`.
+
 ## Estrutura
 
 ```
