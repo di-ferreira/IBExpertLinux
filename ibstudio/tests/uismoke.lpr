@@ -10,8 +10,8 @@ program uismoke;
 uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
   Interfaces, Forms, SysUtils, Classes, Controls, ComCtrls, ExtCtrls, DB, sqldb,
-  ibtypes, ibsession, ibcsv, ibddl, uMain, uSqlTab, uSqlPreview, uEditRecord,
-  uTableEditor;
+  ibtypes, ibsession, ibcsv, ibddl, ibcode, uMain, uSqlTab, uSqlPreview,
+  uEditRecord, uTableEditor, uCodeEditor;
 
 var
   Failures: Integer = 0;
@@ -94,6 +94,9 @@ var
   Sess: TIBStudioSession;
   DlgTable: TfrmTableEditor;
   M: TTableModel;
+  Frame: TCodeEditorFrame;
+  Obj: TCodeObject;
+  Err: string;
   Wait, I: Integer;
   Folder, TableNode: TTreeNode;
   Allow, FoundTable: Boolean;
@@ -271,6 +274,29 @@ begin
           Format('(%d)', [Length(PrimaryKeyFields(DlgTable.Model))]));
       finally
         DlgTable.Free;
+      end;
+    finally
+      Sess.Free;
+    end;
+
+    WriteLn('--- editor de codigo ---');
+    Sess := TIBStudioSession.Create;
+    try
+      Sess.Connect(Profile);
+      Frame := TCodeEditorFrame.Create(nil);
+      try
+        Frame.SetSession(Sess);
+        Frame.SetObject(ckProcedure, 'PROC_TESTE', '', False, True);
+        Frame.SetSource('AS' + LineEnding + 'begin' + LineEnding +
+          '  exit;' + LineEnding + 'end');
+        Frame.Compile;
+        Check('procedure compilada', Pos('sucesso', Frame.LogText) > 0,
+          Frame.LogText);
+        Obj := Sess.LoadCodeObject(ckProcedure, 'PROC_TESTE');
+        Check('procedure no catalogo', Obj.Exists);
+        Sess.ExecuteStatement(DropObjectSQL(ckProcedure, 'PROC_TESTE'), Err);
+      finally
+        Frame.Free;
       end;
     finally
       Sess.Free;

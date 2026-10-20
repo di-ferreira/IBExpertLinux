@@ -11,7 +11,7 @@ interface
 
 uses
   SysUtils, Classes, DB, sqldb, IBConnection, bufdataset, ibase60dyn,
-  ibtypes, ibsqlutil, ibmetadata, ibddl;
+  ibtypes, ibsqlutil, ibmetadata, ibddl, ibcode;
 
 type
   TIBStudioSession = class;
@@ -80,6 +80,10 @@ type
     function RelationFieldMetas(const ARelation: string): TFieldMetaArray;
     { Modelo completo da tabela (campos, chave, indices e FKs). }
     function LoadTableModel(const ARelation: string): TTableModel;
+    { Objeto de codigo lido do catalogo (procedure, trigger, view...). }
+    function LoadCodeObject(AKind: TCodeKind; const AName: string): TCodeObject;
+    { Executa um unico comando, sem dividir o texto em varios. }
+    function ExecuteStatement(const ASQL: string; out AError: string): Boolean;
     { Descarta os caches; chamar depois de DDL que mude o catalogo. }
     procedure ClearMetadataCache;
     property Connected: Boolean read GetConnected;
@@ -1129,6 +1133,237 @@ begin
     end;
   finally
     FkNames.Free;
+  end;
+end;
+
+function TIBStudioSession.LoadCodeObject(AKind: TCodeKind;
+  const AName: string): TCodeObject;
+var
+  Q: TSQLQuery;
+  SQL, Cols, S: string;
+  Found: Boolean;
+
+  { Le a coluna "src" do comando; devolve False quando a coluna nao existe
+    nesta versao do Firebird. }
+  function TryRead(const ASQL: string; out AFound: Boolean): string;
+  var
+    Q2: TSQLQuery;
+  begin
+    AFound := False;
+    Result := '';
+    Q2 := TSQLQuery.Create(nil);
+    try
+      Q2.DataBase := FConn;
+      Q2.Transaction := FTx;
+      Q2.SQL.Text := ASQL;
+      Q2.ParamByName('name').AsString := AName;
+      Q2.Open;
+      if not Q2.EOF then
+      begin
+        AFound := True;
+        Result := Q2.FieldByName('src').AsString;
+      end;
+      Q2.Close;
+    finally
+      Q2.Free;
+    end;
+  end;
+
+begin
+  Result.Kind := AKind;
+  Result.Name := AName;
+  Result.Source := '';
+  Result.Prefix := '';
+  Result.Exists := False;
+  Result.SourceAvailable := True;
+  if (AName = '') or not FConn.Connected then
+    Exit;
+
+  case AKind of
+    ckProcedure:
+      begin
+        { O texto da procedure ficou em rdb$source no Firebird 3.0 e em
+          rdb$procedure_source no 2.5. }
+        try
+          Result.Source := TryRead('select rdb$source as src from ' +
+            'rdb$procedures where rdb$procedure_name = :name', Found);
+        except
+          Found := False;
+        end;
+        if not Found then
+          try
+            Result.Source := TryRead('select rdb$procedure_source as src ' +
+              'from rdb$procedures where rdb$procedure_name = :name', Found);
+          except
+            Found := False;
+          end;
+        Result.Exists := Found;
+      end;
+
+    ckTrigger:
+      begin
+        try
+          Result.Source := TryRead('select rdb$trigger_source as src, ' +
+            'trim(rdb$relation_name) as tab from rdb$triggers ' +
+            'where rdb$trigger_name = :name', Found);
+        except
+          Found := False;
+        end;
+        Result.Exists := Found;
+        { O trigger precisa da tabela onde esta instalado. }
+        if Found then
+        begin
+          Q := TSQLQuery.Create(nil);
+          try
+            Q.DataBase := FConn;
+            Q.Transaction := FTx;
+            Q.SQL.Text := 'select trim(rdb$relation_name) as tab, ' +
+              'cast(rdb$trigger_type as integer) as ttype from rdb$triggers ' +
+              'where rdb$trigger_name = :name';
+            Q.ParamByName('name').AsString := AName;
+            Q.Open;
+            if not Q.EOF then
+              Result.Prefix := 'for ' + Q.FieldByName('tab').AsString + ' ' +
+                TriggerEventSQL(Q.FieldByName('ttype').AsInteger) + ' ';
+            Q.Close;
+          finally
+            Q.Free;
+          end;
+        end;
+      end;
+
+    ckView:
+      begin
+        { O Firebird 2.5 nao guarda o texto da view. }
+        try
+          Result.Source := TryRead('select rdb$view_source as src from ' +
+            'rdb$views where rdb$view_name = :name', Found);
+        except
+          Found := False;
+        end;
+        Result.Exists := Found;
+        Result.SourceAvailable := Found;
+      end;
+
+    ckDomain:
+      begin
+        { No 2.5 o dominio e um campo de rdb$fields sem origem. }
+        try
+          Result.Source := TryRead('select cast(rdb$src as blob sub_type ' +
+            'text) as src from rdb$types where rdb$type_name = :name', Found);
+        except
+          Found := False;
+        end;
+        if not Found then
+        begin
+          Q := TSQLQuery.Create(nil);
+          try
+            Q.DataBase := FConn;
+            Q.Transaction := FTx;
+            Q.SQL.Text :=
+              'select cast(rdb$field_type as integer) as ftype, ' +
+              'cast(coalesce(rdb$field_sub_type, 0) as integer) as fsubtype, ' +
+              'cast(rdb$field_length as integer) as flen, ' +
+              'cast(coalesce(rdb$field_precision, 0) as integer) as fprec, ' +
+              'cast(coalesce(rdb$field_scale, 0) as integer) as fscale ' +
+              'from rdb$fields where rdb$field_name = :name';
+            Q.ParamByName('name').AsString := AName;
+            Q.Open;
+            if not Q.EOF then
+            begin
+              Found := True;
+              Result.Source := LowerCase(DescribeField(
+                Q.FieldByName('ftype').AsInteger,
+                Q.FieldByName('fsubtype').AsInteger,
+                Q.FieldByName('flen').AsInteger,
+                Q.FieldByName('fprec').AsInteger,
+                Q.FieldByName('fscale').AsInteger));
+            end;
+            Q.Close;
+          finally
+            Q.Free;
+          end;
+        end;
+        Result.Exists := Found;
+      end;
+
+    ckException:
+      begin
+        try
+          Result.Source := TryRead('select cast(rdb$exception_message as ' +
+            'varchar(255)) as src from rdb$exceptions ' +
+            'where rdb$exception_name = :name', Found);
+        except
+          Found := False;
+        end;
+        Result.Exists := Found;
+      end;
+
+    ckGenerator:
+      begin
+        try
+          Result.Source := TryRead('select gen_id(rdb$generator_name, 0) ' +
+            'as src from rdb$generators where rdb$generator_name = :name',
+            Found);
+        except
+          Found := False;
+        end;
+        Result.Exists := Found;
+      end;
+
+    ckNoObject:
+      Exit;
+  end;
+
+  { A view precisa da lista de colunas para nao renomear as colunas. }
+  if (AKind = ckView) and Result.Exists then
+  begin
+    Cols := '';
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text := 'select trim(rdb$field_name) as nome from rdb$view_columns ' +
+        'where rdb$view_name = :name order by rdb$field_position';
+      Q.ParamByName('name').AsString := AName;
+      Q.Open;
+      while not Q.EOF do
+      begin
+        if Cols <> '' then
+          Cols := Cols + ', ';
+        Cols := Cols + QuoteIdentifier(Q.FieldByName('nome').AsString);
+        Q.Next;
+      end;
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+    if Cols <> '' then
+      Result.Prefix := '(' + Cols + ') ';
+  end;
+end;
+
+function TIBStudioSession.ExecuteStatement(const ASQL: string;
+  out AError: string): Boolean;
+begin
+  AError := '';
+  Result := False;
+  try
+    RunParams(FConn, FTx, ASQL, nil, False);
+    Commit;
+    Result := True;
+  except
+    on E: Exception do
+    begin
+      AError := DescribeException(E);
+      try
+        if FTx.Active then
+          FTx.Rollback;
+        FTx.StartTransaction;
+      except
+        { Mantem a mensagem original. }
+      end;
+    end;
   end;
 end;
 

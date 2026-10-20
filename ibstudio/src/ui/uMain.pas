@@ -8,8 +8,9 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, StdCtrls, ExtCtrls, ComCtrls, Menus,
   Graphics, Dialogs, LCLType,
-  ibtypes, ibsqlutil, ibmetadata, ibsettings, ibcsv, ibddl, ibsession, uConnect,
-  uSqlTab, uSqlPreview, uCsvOptions, uImportCsv, uTableEditor;
+  ibtypes, ibsqlutil, ibmetadata, ibsettings, ibcsv, ibddl, ibcode, ibsession,
+  uConnect, uSqlTab, uSqlPreview, uCsvOptions, uImportCsv, uTableEditor,
+  uCodeEditor;
 
 type
   TfrmMain = class(TForm)
@@ -29,6 +30,9 @@ type
     FMiOpenData: TMenuItem;
     FMiNewSql: TMenuItem;
     FMiEditStructure: TMenuItem;
+    FMiEditCode: TMenuItem;
+    FMiNewCode: TMenuItem;
+    FMiDropCode: TMenuItem;
     procedure BuildUi;
     procedure ConnectClick(Sender: TObject);
     procedure DisconnectClick(Sender: TObject);
@@ -41,6 +45,11 @@ type
     procedure MenuImportCsvClick(Sender: TObject);
     procedure MenuNewTableClick(Sender: TObject);
     procedure EditStructureClick(Sender: TObject);
+    procedure EditCodeClick(Sender: TObject);
+    procedure NewCodeClick(Sender: TObject);
+    procedure DropCodeClick(Sender: TObject);
+    procedure OpenCodeTab(AKind: TCodeKind; const AName: string);
+    function CodeKindFor(AMeta: TMetadataNode): TCodeKind;
     procedure MenuExitClick(Sender: TObject);
     procedure MenuAboutClick(Sender: TObject);
     procedure TreeExpanding(Sender: TObject; Node: TTreeNode; var AllowChange: Boolean);
@@ -292,6 +301,19 @@ begin
   FMiEditStructure.Caption := 'Editar estrutura';
   FMiEditStructure.OnClick := @EditStructureClick;
   FTreeMenu.Items.Add(FMiEditStructure);
+  FTreeMenu.Items.AddSeparator;
+  FMiEditCode := TMenuItem.Create(FTreeMenu);
+  FMiEditCode.Caption := 'Editar codigo';
+  FMiEditCode.OnClick := @EditCodeClick;
+  FTreeMenu.Items.Add(FMiEditCode);
+  FMiNewCode := TMenuItem.Create(FTreeMenu);
+  FMiNewCode.Caption := 'Criar...';
+  FMiNewCode.OnClick := @NewCodeClick;
+  FTreeMenu.Items.Add(FMiNewCode);
+  FMiDropCode := TMenuItem.Create(FTreeMenu);
+  FMiDropCode.Caption := 'Excluir';
+  FMiDropCode.OnClick := @DropCodeClick;
+  FTreeMenu.Items.Add(FMiDropCode);
   FTreeMenu.OnPopup := @TreeMenuPopup;
   FTree.PopupMenu := FTreeMenu;
   FTree.Font.Name := 'DejaVu Sans';
@@ -520,6 +542,9 @@ begin
       Node.Expand(False);
     mkTable, mkView:
       OpenDataTab(Meta.Name);
+    mkProcedure, mkTrigger, mkDomain, mkException, mkGenerator:
+      if CodeKindFor(Meta) <> ckNoObject then
+        OpenCodeTab(CodeKindFor(Meta), Meta.Name);
   end;
 end;
 
@@ -545,6 +570,9 @@ begin
   FMiOpenData.Enabled := Assigned(Meta) and
     ((Meta.Kind = mkTable) or (Meta.Kind = mkView));
   FMiEditStructure.Enabled := Assigned(Meta) and (Meta.Kind = mkTable);
+  FMiEditCode.Enabled := CodeKindFor(Meta) <> ckNoObject;
+  FMiNewCode.Enabled := FMiEditCode.Enabled;
+  FMiDropCode.Enabled := FMiEditCode.Enabled;
 end;
 
 procedure TfrmMain.OpenDataClick(Sender: TObject);
@@ -762,6 +790,132 @@ begin
   finally
     Dlg.Free;
   end;
+end;
+
+function TfrmMain.CodeKindFor(AMeta: TMetadataNode): TCodeKind;
+begin
+  Result := ckNoObject;
+  if not Assigned(AMeta) then
+    Exit;
+  case AMeta.Kind of
+    mkProcedure: Result := ckProcedure;
+    mkTrigger: Result := ckTrigger;
+    mkView: Result := ckView;
+    mkDomain: Result := ckDomain;
+    mkException: Result := ckException;
+    mkGenerator: Result := ckGenerator;
+  end;
+end;
+
+procedure TfrmMain.OpenCodeTab(AKind: TCodeKind; const AName: string);
+var
+  Sheet: TTabSheet;
+  Frame: TCodeEditorFrame;
+  Obj: TCodeObject;
+begin
+  if not FSession.Connected then
+  begin
+    MessageDlg('Sem conexao', 'Conecte-se a um banco antes de abrir o codigo.',
+      mtInformation, [mbOK], 0);
+    Exit;
+  end;
+
+  Obj := FSession.LoadCodeObject(AKind, AName);
+
+  Sheet := TTabSheet.Create(FTabs);
+  Sheet.PageControl := FTabs;
+  Sheet.Caption := Copy(CodeKindTitle(AKind) + ' ' + AName, 1, 28);
+
+  Frame := TCodeEditorFrame.Create(Sheet);
+  Frame.Parent := Sheet;
+  Frame.Align := alClient;
+  Frame.SetSession(FSession);
+  Frame.SetObject(AKind, AName, Obj.Prefix, Obj.Exists, Obj.SourceAvailable);
+  Frame.SetSource(Obj.Source);
+  FTabs.ActivePage := Sheet;
+end;
+
+procedure TfrmMain.EditCodeClick(Sender: TObject);
+var
+  Meta: TMetadataNode;
+  Kind: TCodeKind;
+begin
+  if not Assigned(FTree.Selected) or not Assigned(FTree.Selected.Data) then
+    Exit;
+  Meta := TMetadataNode(FTree.Selected.Data);
+  Kind := CodeKindFor(Meta);
+  if Kind = ckNoObject then
+    Exit;
+  OpenCodeTab(Kind, Meta.Name);
+end;
+
+procedure TfrmMain.NewCodeClick(Sender: TObject);
+var
+  Meta: TMetadataNode;
+  Kind: TCodeKind;
+  NewName, TableName, Prefix, Source: string;
+begin
+  if not Assigned(FTree.Selected) or not Assigned(FTree.Selected.Data) then
+    Exit;
+  Meta := TMetadataNode(FTree.Selected.Data);
+  Kind := CodeKindFor(Meta);
+  if Kind = ckNoObject then
+    Exit;
+
+  NewName := InputBox('Nome do novo ' + CodeKindName(Kind), 'Nome:', '');
+  if Trim(NewName) = '' then
+    Exit;
+
+  Prefix := '';
+  Source := '';
+  case Kind of
+    ckProcedure:
+      Source := 'AS' + LineEnding + 'begin' + LineEnding + 'end';
+    ckTrigger:
+      begin
+        TableName := InputBox('Tabela do trigger', 'Tabela:', '');
+        if Trim(TableName) = '' then
+          Exit;
+        Prefix := 'for ' + Trim(TableName) + ' ';
+        Source := 'AS' + LineEnding + 'begin' + LineEnding + 'end';
+      end;
+    ckView:
+      Source := 'select 1 from rdb$database';
+    ckDomain:
+      Source := 'varchar(60)';
+    ckException:
+      Source := 'mensagem do erro';
+    ckGenerator:
+      Source := '0';
+  end;
+
+  OpenCodeTab(Kind, Trim(NewName));
+end;
+
+procedure TfrmMain.DropCodeClick(Sender: TObject);
+var
+  Meta: TMetadataNode;
+  Kind: TCodeKind;
+  Err: string;
+begin
+  if not Assigned(FTree.Selected) or not Assigned(FTree.Selected.Data) then
+    Exit;
+  Meta := TMetadataNode(FTree.Selected.Data);
+  Kind := CodeKindFor(Meta);
+  if Kind = ckNoObject then
+    Exit;
+
+  if MessageDlg('Excluir objeto', 'Excluir ' + CodeKindName(Kind) + ' ' +
+    Meta.Name + '?', mtConfirmation, [mbYes, mbNo], 0) <> mrYes then
+    Exit;
+
+  if not FSession.ExecuteScript(DropObjectSQL(Kind, Meta.Name), Err) then
+  begin
+    MessageDlg('Erro ao excluir', Err, mtError, [mbOK], 0);
+    Exit;
+  end;
+  FSession.ClearMetadataCache;
+  PopulateTree;
 end;
 
 procedure TfrmMain.MenuExitClick(Sender: TObject);

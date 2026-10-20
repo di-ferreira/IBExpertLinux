@@ -37,6 +37,22 @@ type
   end;
   TFieldMetaArray = array of TFieldMeta;
 
+  { Objetos de codigo que o editor de codigo manipula. }
+  TCodeKind = (ckNoObject, ckProcedure, ckTrigger, ckView, ckDomain, ckException,
+    ckGenerator);
+
+  { Objeto de codigo lido do catalogo. }
+  TCodeObject = record
+    Kind: TCodeKind;
+    Name: string;
+    Source: string;   { corpo editavel }
+    Prefix: string;   { parte que precede o corpo no comando DDL }
+    Exists: Boolean;
+    { O Firebird 2.5 nao guarda o texto das views: nesse caso o objeto
+      existe, mas a fonte nao esta disponivel. }
+    SourceAvailable: Boolean;
+  end;
+
   { Perfil de conexao informado pelo usuario. A senha nunca e persistida. }
   TConnectionProfile = class
   private

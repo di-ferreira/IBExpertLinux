@@ -11,7 +11,7 @@ program testfb;
 
 uses
   SysUtils, Classes, DB, sqldb, IBConnection, bufdataset,
-  ibtypes, ibsqlutil, ibmetadata, ibdml, ibcsv, ibddl, ibsession;
+  ibtypes, ibsqlutil, ibmetadata, ibdml, ibcsv, ibddl, ibcode, ibsession;
 
 var
   Failures: Integer = 0;
@@ -584,6 +584,76 @@ begin
   end;
 end;
 
+procedure TestCodeEditor(AProfile: TConnectionProfile);
+var
+  S: TIBStudioSession;
+  Obj: TCodeObject;
+  Q: TSQLQuery;
+  Err, SQL: string;
+begin
+  WriteLn('--- editores de codigo ---');
+  S := TIBStudioSession.Create;
+  try
+    S.Connect(AProfile);
+
+    SQL := CreateOrAlterSQL(ckProcedure, 'PROC_TESTE',
+      'AS' + LineEnding + 'begin' + LineEnding + '  exit;' + LineEnding + 'end', '');
+    Check('procedure criada', S.ExecuteStatement(SQL, Err), Err);
+    Obj := S.LoadCodeObject(ckProcedure, 'PROC_TESTE');
+    Check('procedure lida do catalogo', Obj.Exists);
+    Check('fonte da procedure', Pos('exit', Obj.Source) > 0, Obj.Source);
+    Check('procedure removida',
+      S.ExecuteStatement(DropObjectSQL(ckProcedure, 'PROC_TESTE'), Err), Err);
+
+    SQL := CreateOrAlterSQL(ckTrigger, 'TRG_TESTE',
+      'AS' + LineEnding + 'begin' + LineEnding + 'end',
+      'for TESTE_IBSTUDIO after insert ');
+    Check('trigger criado', S.ExecuteStatement(SQL, Err), Err);
+    Obj := S.LoadCodeObject(ckTrigger, 'TRG_TESTE');
+    Check('trigger lido do catalogo', Obj.Exists);
+    Check('prefixo do trigger', Pos('TESTE_IBSTUDIO', Obj.Prefix) > 0,
+      Obj.Prefix);
+    Check('evento do trigger', Pos('after insert', Obj.Prefix) > 0,
+      Obj.Prefix);
+    Check('trigger removido',
+      S.ExecuteStatement(DropObjectSQL(ckTrigger, 'TRG_TESTE'), Err), Err);
+
+    SQL := CreateOrAlterSQL(ckView, 'VW_TESTE', 'select id from teste_ibstudio', '');
+    Check('view criada', S.ExecuteStatement(SQL, Err), Err);
+    { O Firebird 2.5 nao guarda o texto da view: confere no catalogo. }
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := S.Connection;
+      Q.Transaction := S.Transaction;
+      Q.SQL.Text := 'select count(*) as n from rdb$relations ' +
+        'where rdb$relation_name = ''VW_TESTE'' and rdb$view_blr is not null';
+      Q.Open;
+      Check('view no catalogo', Q.Fields[0].AsInteger = 1,
+        Q.Fields[0].AsString);
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+    Check('view removida',
+      S.ExecuteStatement(DropObjectSQL(ckView, 'VW_TESTE'), Err), Err);
+
+    SQL := CreateOrAlterSQL(ckException, 'EXC_TESTE', 'erro de teste', '');
+    Check('exception criada', S.ExecuteStatement(SQL, Err), Err);
+    Check('exception removida',
+      S.ExecuteStatement(DropObjectSQL(ckException, 'EXC_TESTE'), Err), Err);
+
+    SQL := CreateOrAlterSQL(ckDomain, 'DOM_TESTE', 'varchar(30)', '');
+    Check('domain criado', S.ExecuteStatement(SQL, Err), Err);
+    Obj := S.LoadCodeObject(ckDomain, 'DOM_TESTE');
+    Check('domain lido do catalogo',
+      Obj.Exists and (Pos('varchar', Obj.Source) > 0), Obj.Source);
+    Check('domain removido',
+      S.ExecuteStatement(DropObjectSQL(ckDomain, 'DOM_TESTE'), Err), Err);
+  finally
+    S.Free;
+  end;
+end;
+
 var
   Mode, Host, Port, DBFile, User, Pass: string;
   Profile: TConnectionProfile;
@@ -611,6 +681,7 @@ begin
       TestDmlGeneration(Profile);
       TestCsvImport(Profile);
       TestTableEditor(Profile);
+      TestCodeEditor(Profile);
     except
       on E: Exception do
       begin
