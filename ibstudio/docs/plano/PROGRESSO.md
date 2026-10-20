@@ -11,7 +11,7 @@ mudar de estado). O plano completo está em `00-plano-geral.md`.
 | 1 | [Edição de dados](fase-01-edicao-dados.md) | concluída | 2026-10-20 | 2026-10-20 | `4651fa1` |
 | 2 | [CSV](fase-02-csv.md) | concluída | 2026-10-20 | 2026-10-20 | `25025d2` |
 | 3 | [Editor de tabela](fase-03-editor-tabela.md) | concluída | 2026-10-20 | 2026-10-20 | `9fdf618` |
-| 4 | [Editores de código](fase-04-editores-codigo.md) | pendente | — | — | — |
+| 4 | [Editores de código](fase-04-editores-codigo.md) | concluída | 2026-10-20 | 2026-10-20 | `9d39873` |
 | 5 | [Administração](fase-05-administracao.md) | pendente | — | — | — |
 | 6 | [Extração/comparador](fase-06-extracao-comparador.md) | pendente | — | — | — |
 | 7 | [Assistente do editor](fase-07-assistente-editor.md) | pendente | — | — | — |
@@ -156,8 +156,41 @@ feito. Se algo ficar para depois, registrar como pendência da fase seguinte.
     coluna "PK" na grade de campos (posição na chave).
 
 ### Fase 4 — Editores de código
-- Status: pendente
-- Observações: —
+- Status: concluída (2026-10-20, commit `9d39873`)
+- Entregue:
+  - `src/core/ibcode.pas`: `CodeKindName`, `CodeKindTitle`,
+    `CreateOrAlterSQL`, `DropObjectSQL`, `SetGeneratorSQL`,
+    `TriggerEventSQL`, `ErrorLineNumber` (extrai a linha do erro do
+    servidor) e `CommentLines`.
+  - `src/core/ibsession.pas`: `LoadCodeObject` lê o objeto do catálogo
+    (procedure, trigger, view, domain, exception, generator) com o prefixo
+    necessário ao DDL (tabela e evento do trigger, colunas da view) e
+    `ExecuteStatement` (um único comando, sem dividir o texto).
+  - `src/core/ibtypes.pas`: `TCodeKind` e `TCodeObject`.
+  - `src/ui/uCodeEditor.pas`: frame de edição com realce, *Compilar (F9)*,
+    *Salvar*, *Carregar*, *Comentar* e painel de mensagens; no erro, o cursor
+    vai para a linha indicada pelo servidor.
+  - `src/ui/uMain.pas`: duplo clique em procedure/trigger/domain/exception/
+    generator abre o editor; menu de contexto com *Editar código*, *Criar…*
+    e *Excluir*.
+- Testes: `tc_code.pas` (9 casos, núcleo = 78), bloco `editores de codigo` no
+  `testfb.lpr` (cria e lê procedure, trigger, view, exception e domain) e no
+  `uismoke.lpr` (compila uma procedure pelo frame e confere no catálogo).
+- Verificação: `make check`, `make test` (78/78), `make testfb` e `make
+  uismoke` verdes.
+- Observações/desvios (Firebird 2.5 tem sintaxe própria):
+  - O trigger **exige** o evento no comando
+    (`create or alter trigger X for T after insert as …`); o evento é lido de
+    `rdb$trigger_type` e decodificado por `TriggerEventSQL` (valores
+    levantados no próprio 2.5).
+  - Não existe `create or alter domain` no 2.5: o editor remove o domínio
+    antes de recriá-lo.
+  - O 2.5 não guarda o texto das views (`rdb$views` nem existe): o editor
+    avisa que a fonte não está disponível e não compila.
+  - A fonte da procedure no 2.5 vem sem o `AS` (`rdb$procedure_source`); a
+    do trigger vem com (`rdb$trigger_source`).
+  - O código é enviado como um único comando (o `;` do corpo quebraria a
+    divisão automática de scripts).
 
 ### Fase 5 — Administração
 - Status: pendente
