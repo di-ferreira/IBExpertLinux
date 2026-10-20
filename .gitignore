@@ -10,6 +10,8 @@ __pycache__/
 
 # artefatos de build do IBStudio (FPC/Lazarus)
 ibstudio/ibstudio
+ibstudio/ibstudio.exe
+ibstudio/dist/
 ibstudio/lib/
 ibstudio/tests/lib/
 ibstudio/tests/testcore

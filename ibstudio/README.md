@@ -65,6 +65,38 @@ No Windows, abra `ibstudio.lpi` no Lazarus e compile (ou `lazbuild
 ibstudio.lpi` com o FPC/Lazarus instalado). O código é o mesmo; só o widgetset
 muda.
 
+### Executável Windows gerado no Linux
+
+`make win64` produz `dist/win64/ibstudio.exe` (PE32+ GUI x64, já sem símbolos)
+usando o compilador cruzado do FPC. Uma vez:
+
+```sh
+sudo apt install binutils-mingw-w64-x86-64
+curl -L -o fpcsrc.tar.gz \
+  https://codeload.github.com/fpc/FPCSource/tar.gz/refs/tags/release_3_2_2
+tar xzf fpcsrc.tar.gz && cd FPCSource-release_3_2_2
+make crossall OS_TARGET=win64 CPU_TARGET=x86_64 \
+     CROSSBINDIR=/usr/bin BINUTILSPREFIX=x86_64-w64-mingw32-
+make crossinstall OS_TARGET=win64 CPU_TARGET=x86_64 INSTALL_PREFIX=/opt/fpc-cross
+# fv/vcl-compat trazem Menus/Dialogs com os mesmos nomes da LCL: fora.
+sudo rm -rf /opt/fpc-cross/lib/fpc/3.2.2/units/x86_64-win64/{fv,vcl-compat}
+```
+
+Depois, na pasta `ibstudio/`:
+
+```sh
+make win64   # dist/win64/ibstudio.exe
+```
+
+O wrapper `tools/fpc-win64.sh` é o compilador usado pelo lazbuild (ele injeta
+`-Twin64 -Px86_64` e os caminhos das unidades cruzadas). Use
+`FPC_WIN64_ROOT=/outro/caminho` se a toolchain não estiver em `/opt/fpc-cross`.
+
+No Windows o app carrega o cliente Firebird em tempo de execução: copie
+`fbclient.dll` (ou `gds32.dll`) de mesma arquitetura para a pasta do `.exe` ou
+para o `PATH`, ou aponte o caminho com a variável `IBSTUDIO_FBCLIENT`. O
+executável de 64 bits exige o cliente de 64 bits.
+
 ## Testes
 
 ```sh
