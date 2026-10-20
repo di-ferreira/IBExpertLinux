@@ -8,8 +8,8 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, StdCtrls, ExtCtrls, ComCtrls, Menus,
   Graphics, Dialogs, LCLType,
-  ibtypes, ibsqlutil, ibmetadata, ibsettings, ibcsv, ibsession, uConnect,
-  uSqlTab, uSqlPreview, uCsvOptions, uImportCsv;
+  ibtypes, ibsqlutil, ibmetadata, ibsettings, ibcsv, ibddl, ibsession, uConnect,
+  uSqlTab, uSqlPreview, uCsvOptions, uImportCsv, uTableEditor;
 
 type
   TfrmMain = class(TForm)
@@ -28,6 +28,7 @@ type
     FTreeMenu: TPopupMenu;
     FMiOpenData: TMenuItem;
     FMiNewSql: TMenuItem;
+    FMiEditStructure: TMenuItem;
     procedure BuildUi;
     procedure ConnectClick(Sender: TObject);
     procedure DisconnectClick(Sender: TObject);
@@ -38,6 +39,8 @@ type
     procedure MenuPreviewClick(Sender: TObject);
     procedure MenuExportCsvClick(Sender: TObject);
     procedure MenuImportCsvClick(Sender: TObject);
+    procedure MenuNewTableClick(Sender: TObject);
+    procedure EditStructureClick(Sender: TObject);
     procedure MenuExitClick(Sender: TObject);
     procedure MenuAboutClick(Sender: TObject);
     procedure TreeExpanding(Sender: TObject; Node: TTreeNode; var AllowChange: Boolean);
@@ -111,7 +114,7 @@ var
   LeftPanel: TPanel;
   Splitter: TSplitter;
   Main: TMainMenu;
-  MFile, MQuery, MFerramentas, MHelp, Item: TMenuItem;
+  MFile, MQuery, MFerramentas, MBanco, MHelp, Item: TMenuItem;
 begin
   Caption := 'IBStudio';
   Width := 1100;
@@ -177,6 +180,15 @@ begin
   Item.Caption := 'Importar CSV...';
   Item.OnClick := @MenuImportCsvClick;
   MQuery.Add(Item);
+
+  MBanco := TMenuItem.Create(Main);
+  MBanco.Caption := '&Banco';
+  Main.Items.Add(MBanco);
+
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Nova tabela...';
+  Item.OnClick := @MenuNewTableClick;
+  MBanco.Add(Item);
 
   MFerramentas := TMenuItem.Create(Main);
   MFerramentas.Caption := '&Ferramentas';
@@ -276,6 +288,10 @@ begin
   FMiNewSql.Caption := 'Novo SQL';
   FMiNewSql.OnClick := @NewSqlFromTreeClick;
   FTreeMenu.Items.Add(FMiNewSql);
+  FMiEditStructure := TMenuItem.Create(FTreeMenu);
+  FMiEditStructure.Caption := 'Editar estrutura';
+  FMiEditStructure.OnClick := @EditStructureClick;
+  FTreeMenu.Items.Add(FMiEditStructure);
   FTreeMenu.OnPopup := @TreeMenuPopup;
   FTree.PopupMenu := FTreeMenu;
   FTree.Font.Name := 'DejaVu Sans';
@@ -528,6 +544,7 @@ begin
     Meta := TMetadataNode(FTree.Selected.Data);
   FMiOpenData.Enabled := Assigned(Meta) and
     ((Meta.Kind = mkTable) or (Meta.Kind = mkView));
+  FMiEditStructure.Enabled := Assigned(Meta) and (Meta.Kind = mkTable);
 end;
 
 procedure TfrmMain.OpenDataClick(Sender: TObject);
@@ -692,6 +709,56 @@ begin
   try
     Dlg.SetSession(FSession);
     Dlg.ShowModal;
+  finally
+    Dlg.Free;
+  end;
+end;
+
+procedure TfrmMain.MenuNewTableClick(Sender: TObject);
+var
+  Dlg: TfrmTableEditor;
+  Model: TTableModel;
+begin
+  if not FSession.Connected then
+  begin
+    MessageDlg('Sem conexao', 'Conecte-se a um banco antes de criar tabelas.',
+      mtInformation, [mbOK], 0);
+    Exit;
+  end;
+
+  Dlg := TfrmTableEditor.Create(Self);
+  try
+    Dlg.Caption := 'Nova tabela';
+    Dlg.SetSession(FSession);
+    Model := Default(TTableModel);
+    Dlg.SetModel(Model, True);
+    if Dlg.ShowModal = mrOk then
+      PopulateTree;
+  finally
+    Dlg.Free;
+  end;
+end;
+
+procedure TfrmMain.EditStructureClick(Sender: TObject);
+var
+  Meta: TMetadataNode;
+  Dlg: TfrmTableEditor;
+  Model: TTableModel;
+begin
+  if not Assigned(FTree.Selected) or not Assigned(FTree.Selected.Data) then
+    Exit;
+  Meta := TMetadataNode(FTree.Selected.Data);
+  if Meta.Kind <> mkTable then
+    Exit;
+
+  Dlg := TfrmTableEditor.Create(Self);
+  try
+    Dlg.Caption := 'Editar estrutura - ' + Meta.Name;
+    Dlg.SetSession(FSession);
+    Model := FSession.LoadTableModel(Meta.Name);
+    Dlg.SetModel(Model, False);
+    if Dlg.ShowModal = mrOk then
+      PopulateTree;
   finally
     Dlg.Free;
   end;

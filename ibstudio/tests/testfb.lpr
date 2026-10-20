@@ -11,7 +11,7 @@ program testfb;
 
 uses
   SysUtils, Classes, DB, sqldb, IBConnection, bufdataset,
-  ibtypes, ibsqlutil, ibmetadata, ibdml, ibcsv, ibsession;
+  ibtypes, ibsqlutil, ibmetadata, ibdml, ibcsv, ibddl, ibsession;
 
 var
   Failures: Integer = 0;
@@ -481,6 +481,109 @@ begin
   DeleteFile(CsvFile);
 end;
 
+procedure TestTableEditor(AProfile: TConnectionProfile);
+var
+  S: TIBStudioSession;
+  M, M2, M3: TTableModel;
+  F: TFieldDefModel;
+  Stmts: TStringArray;
+  Script, Err: string;
+  I: Integer;
+  Q: TSQLQuery;
+  Found: Boolean;
+begin
+  WriteLn('--- editor de tabela (DDL) ---');
+  S := TIBStudioSession.Create;
+  try
+    S.Connect(AProfile);
+
+    { Tabela de execucoes anteriores: descarta antes de criar. }
+    S.ExecuteScript(DropTableSQL('TABELA_TESTE'), Err);
+
+    M := Default(TTableModel);
+    M.Name := 'TABELA_TESTE';
+    F := Default(TFieldDefModel);
+    F.Name := 'ID';
+    F.TypeName := 'INTEGER';
+    F.NotNull := True;
+    F.PrimaryKeyPos := 1;
+    SetLength(M.Fields, 1);
+    M.Fields[0] := F;
+    F := Default(TFieldDefModel);
+    F.Name := 'NOME';
+    F.TypeName := 'VARCHAR';
+    F.Length := 60;
+    SetLength(M.Fields, 2);
+    M.Fields[1] := F;
+
+    Stmts := CreateTableSQL(M);
+    Script := '';
+    for I := 0 to High(Stmts) do
+      Script := Script + Stmts[I] + LineEnding;
+
+    Check('script de criacao executado', S.ExecuteScript(Script, Err), Err);
+
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := S.Connection;
+      Q.Transaction := S.Transaction;
+      Q.SQL.Text :=
+        'select count(*) as n from rdb$relations where rdb$relation_name = ''TABELA_TESTE''';
+      Q.Open;
+      Check('tabela criada', Q.Fields[0].AsInteger = 1,
+        Q.Fields[0].AsString);
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+
+    { Le a estrutura de volta do catalogo. }
+    M2 := S.LoadTableModel('TABELA_TESTE');
+    Check('modelo com 2 campos', Length(M2.Fields) = 2,
+      Format('(%d)', [Length(M2.Fields)]));
+    Check('chave primaria com 1 coluna',
+      Length(PrimaryKeyFields(M2)) = 1,
+      Format('(%d)', [Length(PrimaryKeyFields(M2))]));
+    Found := False;
+    for I := 0 to High(M2.Fields) do
+      if SameText(M2.Fields[I].Name, 'NOME') then
+        Found := M2.Fields[I].TypeName = 'VARCHAR';
+    Check('campo NOME do tipo certo', Found);
+
+    { Altera a estrutura: nova coluna. }
+    M3 := M2;
+    SetLength(M3.Fields, 3);
+    M3.Fields[2] := Default(TFieldDefModel);
+    M3.Fields[2].Name := 'OBS';
+    M3.Fields[2].TypeName := 'VARCHAR';
+    M3.Fields[2].Length := 30;
+    Stmts := AlterTableSQL(M2, M3);
+    Script := '';
+    for I := 0 to High(Stmts) do
+      Script := Script + Stmts[I] + LineEnding;
+    Check('script de alteracao executado', S.ExecuteScript(Script, Err), Err);
+
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := S.Connection;
+      Q.Transaction := S.Transaction;
+      Q.SQL.Text :=
+        'select count(*) as n from rdb$relation_fields ' +
+        'where rdb$relation_name = ''TABELA_TESTE'' and rdb$field_name = ''OBS''';
+      Q.Open;
+      Check('coluna adicionada', Q.Fields[0].AsInteger = 1,
+        Q.Fields[0].AsString);
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+
+    Check('tabela removida', S.ExecuteScript(DropTableSQL('TABELA_TESTE'), Err), Err);
+  finally
+    S.Free;
+  end;
+end;
+
 var
   Mode, Host, Port, DBFile, User, Pass: string;
   Profile: TConnectionProfile;
@@ -507,6 +610,7 @@ begin
       TestExecuteParams(Profile);
       TestDmlGeneration(Profile);
       TestCsvImport(Profile);
+      TestTableEditor(Profile);
     except
       on E: Exception do
       begin

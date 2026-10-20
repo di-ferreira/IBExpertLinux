@@ -50,6 +50,9 @@ function ListSQLFor(AKind: TMetadataKind): string;
 function DescribeField(AFieldType, ASubType, ALength, APrecision, AScale: Integer;
   ABytesPerChar: Integer = 1): string;
 
+{ Nome do tipo, sem tamanho: VARCHAR, INTEGER, NUMERIC... }
+function BaseTypeName(AFieldType, ASubType: Integer): string;
+
 { Monta a descricao final de uma coluna/parametro. }
 function DescribeColumn(AFieldType, ASubType, ALength, APrecision, AScale: Integer;
   ANullable: Boolean; ABytesPerChar: Integer = 1): string;
@@ -219,6 +222,45 @@ begin
       Result := 'NUMERIC'
     else
       Result := '';
+  end;
+end;
+
+function BaseTypeName(AFieldType, ASubType: Integer): string;
+begin
+  case AFieldType of
+    fbtSmallInt:
+      if ASubType = 1 then
+        Result := 'NUMERIC'
+      else if ASubType = 2 then
+        Result := 'DECIMAL'
+      else
+        Result := 'SMALLINT';
+    fbtInteger:
+      if ASubType = 1 then
+        Result := 'NUMERIC'
+      else if ASubType = 2 then
+        Result := 'DECIMAL'
+      else
+        Result := 'INTEGER';
+    fbtBigInt:
+      if ASubType = 1 then
+        Result := 'NUMERIC'
+      else if ASubType = 2 then
+        Result := 'DECIMAL'
+      else
+        Result := 'BIGINT';
+    fbtFloat: Result := 'FLOAT';
+    fbtDFloat: Result := 'D_FLOAT';
+    fbtDouble: Result := 'DOUBLE PRECISION';
+    fbtDate: Result := 'DATE';
+    fbtTime: Result := 'TIME';
+    fbtTimestamp: Result := 'TIMESTAMP';
+    fbtBoolean: Result := 'BOOLEAN';
+    fbtChar: Result := 'CHAR';
+    fbtVarchar: Result := 'VARCHAR';
+    fbtBlob: Result := 'BLOB';
+  else
+    Result := 'INTEGER';
   end;
 end;
 

@@ -11,7 +11,7 @@ interface
 
 uses
   SysUtils, Classes, DB, sqldb, IBConnection, bufdataset, ibase60dyn,
-  ibtypes, ibsqlutil, ibmetadata;
+  ibtypes, ibsqlutil, ibmetadata, ibddl;
 
 type
   TIBStudioSession = class;
@@ -61,6 +61,9 @@ type
     { Executa um comando curto na conexao da UI. }
     function Execute(const ASQL: string; AParams: TParams = nil;
       ACommit: Boolean = True): Int64;
+    { Executa varios comandos; em caso de erro, desfaz e devolve a mensagem. }
+    function ExecuteScript(const AScript: string; out AError: string;
+      ACommit: Boolean = True): Boolean;
     procedure Commit;
     procedure Rollback;
     procedure FillFolder(ANode: TMetadataNode);
@@ -75,6 +78,8 @@ type
     function PrimaryKeyColumns(const ARelation: string): TStrings;
     { Metadados dos campos de uma relacao (nova lista: liberar pelo chamador). }
     function RelationFieldMetas(const ARelation: string): TFieldMetaArray;
+    { Modelo completo da tabela (campos, chave, indices e FKs). }
+    function LoadTableModel(const ARelation: string): TTableModel;
     { Descarta os caches; chamar depois de DDL que mude o catalogo. }
     procedure ClearMetadataCache;
     property Connected: Boolean read GetConnected;
@@ -111,6 +116,30 @@ begin
   Result := Trim(E.Message);
   if Result = '' then
     Result := E.ClassName;
+end;
+
+{ SQL dos campos de uma tabela. A origem computada fica em rdb$fields no
+  Firebird 2.5 e em rdb$relation_fields no 3.0 em diante. }
+function FieldsSQL(const AComputedExpr: string): string;
+begin
+  Result :=
+    'select trim(rf.rdb$field_name) as nome, ' +
+    'cast(f.rdb$field_type as integer) as ftype, ' +
+    'cast(coalesce(f.rdb$field_sub_type, 0) as integer) as fsubtype, ' +
+    'cast(f.rdb$field_length as integer) as flen, ' +
+    'cast(coalesce(f.rdb$field_precision, 0) as integer) as fprec, ' +
+    'cast(coalesce(f.rdb$field_scale, 0) as integer) as fscale, ' +
+    'cast(coalesce(rf.rdb$null_flag, 0) as integer) as fnull, ' +
+    'cast(coalesce(f.rdb$default_source, '''') as varchar(255)) as defsrc, ' +
+    'cast(coalesce(' + AComputedExpr + ', '''') as varchar(255)) as compsrc, ' +
+    'cast(coalesce(f.rdb$description, '''') as varchar(255)) as descr, ' +
+    'cast(coalesce(cs.rdb$bytes_per_character, 1) as integer) as fbpc ' +
+    'from rdb$relation_fields rf ' +
+    'join rdb$fields f on f.rdb$field_name = rf.rdb$field_source ' +
+    'left join rdb$character_sets cs ' +
+    '  on cs.rdb$character_set_id = f.rdb$character_set_id ' +
+    'where rf.rdb$relation_name = :rel ' +
+    'order by rf.rdb$field_position';
 end;
 
 function LoadClient(const ALib: string): Boolean;
@@ -540,6 +569,43 @@ begin
   FTx.StartTransaction;
 end;
 
+function TIBStudioSession.ExecuteScript(const AScript: string; out AError: string;
+  ACommit: Boolean): Boolean;
+var
+  Stmts: TStatementArray;
+  I: Integer;
+begin
+  AError := '';
+  Result := False;
+
+  Stmts := SplitStatements(AScript);
+  if Length(Stmts) = 0 then
+  begin
+    AError := 'Nenhum comando para executar.';
+    Exit;
+  end;
+
+  try
+    for I := 0 to High(Stmts) do
+      RunParams(FConn, FTx, Stmts[I].SQL, nil, False);
+    if ACommit then
+      Commit;
+    Result := True;
+  except
+    on E: Exception do
+    begin
+      AError := DescribeException(E);
+      try
+        if FTx.Active then
+          FTx.Rollback;
+        FTx.StartTransaction;
+      except
+        { Mantem a mensagem original. }
+      end;
+    end;
+  end;
+end;
+
 procedure TIBStudioSession.Rollback;
 begin
   if FTx.Active then
@@ -789,6 +855,281 @@ begin
   end;
 
   Result := List;
+end;
+
+function TIBStudioSession.LoadTableModel(const ARelation: string): TTableModel;
+var
+  Q: TSQLQuery;
+  Rel: string;
+  I, J, Count, IdxCount, FkCount: Integer;
+  PkPos: Integer;
+  Field: TFieldDefModel;
+  Idx: TIndexModel;
+  Fk: TFkModel;
+  IndexMap: TStringList;
+  PkIndex: string;
+  FkNames: TStringList;
+  Fields: TStringList;
+  S: string;
+  Bpc: Integer;
+
+  function IndexOfField(const AFields: TFieldDefArray;
+    const AName: string): Integer;
+  var
+    K: Integer;
+  begin
+    for K := 0 to High(AFields) do
+      if SameText(AFields[K].Name, AName) then
+        Exit(K);
+    Result := -1;
+  end;
+
+begin
+  Result.Name := ARelation;
+  Result.Description := '';
+  Result.Fields := nil;
+  Result.Indexes := nil;
+  Result.ForeignKeys := nil;
+  if (ARelation = '') or not FConn.Connected then
+    Exit;
+
+  Rel := ResolveRelationName(ARelation);
+  Result.Name := Rel;
+
+  { Campos. A coluna de origem computada mudou de lugar entre o Firebird
+    2.5 (rdb$fields) e o 3.0 (rdb$relation_fields): tenta as duas. }
+  Q := TSQLQuery.Create(nil);
+  try
+    Q.DataBase := FConn;
+    Q.Transaction := FTx;
+    try
+      Q.SQL.Text := FieldsSQL('rf.rdb$computed_source');
+      Q.ParamByName('rel').AsString := Rel;
+      Q.Open;
+    except
+      Q.SQL.Text := FieldsSQL('f.rdb$computed_source');
+      Q.ParamByName('rel').AsString := Rel;
+      Q.Open;
+    end;
+    Count := 0;
+    while not Q.EOF do
+    begin
+      Field := Default(TFieldDefModel);
+      Field.Name := Trim(Q.FieldByName('nome').AsString);
+      Field.SubType := Q.FieldByName('fsubtype').AsInteger;
+      Field.TypeName := BaseTypeName(Q.FieldByName('ftype').AsInteger, Field.SubType);
+      Field.NotNull := Q.FieldByName('fnull').AsInteger <> 0;
+      Field.DefaultValue := Trim(Q.FieldByName('defsrc').AsString);
+      Field.ComputedSource := Trim(Q.FieldByName('compsrc').AsString);
+      Field.Computed := Field.ComputedSource <> '';
+      Field.Description := Trim(Q.FieldByName('descr').AsString);
+      Bpc := Q.FieldByName('fbpc').AsInteger;
+      if Bpc < 1 then
+        Bpc := 1;
+      if (Field.TypeName = 'VARCHAR') or (Field.TypeName = 'CHAR') then
+        Field.Length := Q.FieldByName('flen').AsInteger div Bpc
+      else if (Field.TypeName = 'NUMERIC') or (Field.TypeName = 'DECIMAL') then
+      begin
+        Field.Length := Q.FieldByName('fprec').AsInteger;
+        { No catalogo a escala vem negativa quando o numero tem casas
+          decimais. }
+        Field.Scale := Abs(Q.FieldByName('fscale').AsInteger);
+      end
+      else if Field.TypeName = 'FLOAT' then
+        Field.Length := Q.FieldByName('fprec').AsInteger;
+
+      Inc(Count);
+      SetLength(Result.Fields, Count);
+      Result.Fields[Count - 1] := Field;
+      Q.Next;
+    end;
+    Q.Close;
+  finally
+    Q.Free;
+  end;
+
+  { Chave primaria: posicao de cada coluna. }
+  PkIndex := '';
+  Q := TSQLQuery.Create(nil);
+  try
+    Q.DataBase := FConn;
+    Q.Transaction := FTx;
+    Q.SQL.Text :=
+      'select trim(seg.rdb$field_name) as nome, ' +
+      'cast(seg.rdb$field_position as integer) as spos, ' +
+      'trim(idx.rdb$index_name) as iname ' +
+      'from rdb$relation_constraints rc ' +
+      'join rdb$indices idx on idx.rdb$index_name = rc.rdb$index_name ' +
+      'join rdb$index_segments seg on seg.rdb$index_name = idx.rdb$index_name ' +
+      'where rc.rdb$constraint_type = ''PRIMARY KEY'' ' +
+      'and rc.rdb$relation_name = :rel ' +
+      'order by seg.rdb$field_position';
+    Q.ParamByName('rel').AsString := Rel;
+    Q.Open;
+    PkPos := 0;
+    while not Q.EOF do
+    begin
+      I := IndexOfField(Result.Fields, Trim(Q.FieldByName('nome').AsString));
+      if I >= 0 then
+      begin
+        { A posicao gravada no catalogo comeca em 0 no Firebird 2.5 e em 1
+          no 3.0: usa a ordem do resultado. }
+        Inc(PkPos);
+        Result.Fields[I].PrimaryKeyPos := PkPos;
+      end;
+      PkIndex := Trim(Q.FieldByName('iname').AsString);
+      Q.Next;
+    end;
+    Q.Close;
+  finally
+    Q.Free;
+  end;
+
+  { Indices (sem o indice da chave primaria). }
+  IndexMap := TStringList.Create;
+  try
+    IndexMap.Sorted := True;
+    IndexMap.Duplicates := dupIgnore;
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text :=
+        'select trim(idx.rdb$index_name) as iname, ' +
+        'cast(coalesce(idx.rdb$unique_flag, 0) as integer) as uniq, ' +
+        'trim(seg.rdb$field_name) as fname, ' +
+        'cast(seg.rdb$field_position as integer) as spos ' +
+        'from rdb$indices idx ' +
+        'join rdb$index_segments seg on seg.rdb$index_name = idx.rdb$index_name ' +
+        'where idx.rdb$relation_name = :rel ' +
+        'and coalesce(idx.rdb$system_flag, 0) = 0 ' +
+        'order by idx.rdb$index_name, seg.rdb$field_position';
+      Q.ParamByName('rel').AsString := Rel;
+      Q.Open;
+      IdxCount := 0;
+      while not Q.EOF do
+      begin
+        S := Trim(Q.FieldByName('iname').AsString);
+        if (S <> '') and (not SameText(S, PkIndex)) then
+        begin
+          I := IndexMap.IndexOf(S);
+          if I < 0 then
+          begin
+            Idx := Default(TIndexModel);
+            Idx.Name := S;
+            Idx.Unique := Q.FieldByName('uniq').AsInteger <> 0;
+            Idx.Fields := nil;
+            Inc(IdxCount);
+            SetLength(Result.Indexes, IdxCount);
+            Result.Indexes[IdxCount - 1] := Idx;
+            IndexMap.Add(S);
+            I := IdxCount - 1;
+          end;
+          SetLength(Result.Indexes[I].Fields,
+            Length(Result.Indexes[I].Fields) + 1);
+          Result.Indexes[I].Fields[High(Result.Indexes[I].Fields)] :=
+            Trim(Q.FieldByName('fname').AsString);
+        end;
+        Q.Next;
+      end;
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+  finally
+    IndexMap.Free;
+  end;
+
+  { Chaves estrangeiras. }
+  FkNames := TStringList.Create;
+  try
+    FkNames.Sorted := True;
+    FkNames.Duplicates := dupIgnore;
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text :=
+        'select trim(rc.rdb$constraint_name) as cname, ' +
+        'trim(ref_con.rdb$relation_name) as reftab, ' +
+        'cast(coalesce(rc.rdb$update_rule, 0) as integer) as updrule, ' +
+        'cast(coalesce(rc.rdb$delete_rule, 0) as integer) as delrule ' +
+        'from rdb$ref_constraints rc ' +
+        'join rdb$relation_constraints fk_con ' +
+        '  on fk_con.rdb$constraint_name = rc.rdb$constraint_name ' +
+        'join rdb$relation_constraints ref_con ' +
+        '  on ref_con.rdb$index_name = rc.rdb$const_name_uq ' +
+        'where fk_con.rdb$relation_name = :rel ' +
+        'order by rc.rdb$constraint_name';
+      Q.ParamByName('rel').AsString := Rel;
+      Q.Open;
+      FkCount := 0;
+      while not Q.EOF do
+      begin
+        Fk := Default(TFkModel);
+        Fk.Name := Trim(Q.FieldByName('cname').AsString);
+        Fk.RefTable := Trim(Q.FieldByName('reftab').AsString);
+        Fk.OnUpdate := RefRuleName(Q.FieldByName('updrule').AsInteger);
+        Fk.OnDelete := RefRuleName(Q.FieldByName('delrule').AsInteger);
+        Fk.Fields := nil;
+        Fk.RefFields := nil;
+        Inc(FkCount);
+        SetLength(Result.ForeignKeys, FkCount);
+        Result.ForeignKeys[FkCount - 1] := Fk;
+        FkNames.Add(Fk.Name);
+        Q.Next;
+      end;
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+
+    { Colunas de cada chave estrangeira. }
+    if FkCount > 0 then
+    begin
+      Q := TSQLQuery.Create(nil);
+      try
+        Q.DataBase := FConn;
+        Q.Transaction := FTx;
+        Q.SQL.Text :=
+          'select trim(rc.rdb$constraint_name) as cname, ' +
+          'trim(src_seg.rdb$field_name) as srcfield, ' +
+          'trim(ref_seg.rdb$field_name) as reffield ' +
+          'from rdb$ref_constraints rc ' +
+          'join rdb$relation_constraints fk_con ' +
+          '  on fk_con.rdb$constraint_name = rc.rdb$constraint_name ' +
+          'join rdb$index_segments src_seg ' +
+          '  on src_seg.rdb$index_name = fk_con.rdb$index_name ' +
+          'join rdb$index_segments ref_seg ' +
+          '  on ref_seg.rdb$index_name = rc.rdb$const_name_uq ' +
+          'where rc.rdb$constraint_name = :cname ' +
+          'order by src_seg.rdb$field_position';
+        Q.Open;
+        while not Q.EOF do
+        begin
+          S := Trim(Q.FieldByName('cname').AsString);
+          I := FkNames.IndexOf(S);
+          if I >= 0 then
+          begin
+            SetLength(Result.ForeignKeys[I].Fields,
+              Length(Result.ForeignKeys[I].Fields) + 1);
+            Result.ForeignKeys[I].Fields[High(Result.ForeignKeys[I].Fields)] :=
+              Trim(Q.FieldByName('srcfield').AsString);
+            SetLength(Result.ForeignKeys[I].RefFields,
+              Length(Result.ForeignKeys[I].RefFields) + 1);
+            Result.ForeignKeys[I].RefFields[High(Result.ForeignKeys[I].RefFields)] :=
+              Trim(Q.FieldByName('reffield').AsString);
+          end;
+          Q.Next;
+        end;
+        Q.Close;
+      finally
+        Q.Free;
+      end;
+    end;
+  finally
+    FkNames.Free;
+  end;
 end;
 
 function TIBStudioSession.RelationFieldMetas(const ARelation: string): TFieldMetaArray;

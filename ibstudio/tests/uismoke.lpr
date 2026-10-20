@@ -10,7 +10,8 @@ program uismoke;
 uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
   Interfaces, Forms, SysUtils, Classes, Controls, ComCtrls, ExtCtrls, DB, sqldb,
-  ibtypes, ibsession, ibcsv, uMain, uSqlTab, uSqlPreview, uEditRecord;
+  ibtypes, ibsession, ibcsv, ibddl, uMain, uSqlTab, uSqlPreview, uEditRecord,
+  uTableEditor;
 
 var
   Failures: Integer = 0;
@@ -90,6 +91,9 @@ var
   CsvOpts: TCsvOptions;
   CsvStream: TFileStream;
   CsvTable: TCsvTable;
+  Sess: TIBStudioSession;
+  DlgTable: TfrmTableEditor;
+  M: TTableModel;
   Wait, I: Integer;
   Folder, TableNode: TTreeNode;
   Allow, FoundTable: Boolean;
@@ -249,6 +253,27 @@ begin
       end;
     finally
       DlgEdit.Free;
+    end;
+
+    WriteLn('--- editor de tabela ---');
+    Sess := TIBStudioSession.Create;
+    try
+      Sess.Connect(Profile);
+      DlgTable := TfrmTableEditor.Create(nil);
+      try
+        DlgTable.SetSession(Sess);
+        M := Sess.LoadTableModel('TESTE_IBSTUDIO');
+        DlgTable.SetModel(M, False);
+        Check('editor carregou os campos', Length(DlgTable.Model.Fields) = 6,
+          Format('(%d)', [Length(DlgTable.Model.Fields)]));
+        Check('chave primaria carregada',
+          Length(PrimaryKeyFields(DlgTable.Model)) = 1,
+          Format('(%d)', [Length(PrimaryKeyFields(DlgTable.Model))]));
+      finally
+        DlgTable.Free;
+      end;
+    finally
+      Sess.Free;
     end;
 
     WriteLn('--- previa de SQL ---');

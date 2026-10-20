@@ -5,7 +5,7 @@ program compilecheck;
 {$mode objfpc}{$H+}
 
 uses
-  ibtypes, ibsqlutil, ibmetadata, ibsettings, ibdml, ibcsv, ibsession;
+  ibtypes, ibsqlutil, ibmetadata, ibsettings, ibdml, ibcsv, ibddl, ibsession;
 
 begin
 end.
