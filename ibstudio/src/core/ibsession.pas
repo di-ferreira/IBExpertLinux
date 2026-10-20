@@ -69,6 +69,12 @@ type
     function RelationNames: TStrings;
     { Campos de uma relacao, na ordem do catalogo (nao liberar). }
     function RelationFields(const ARelation: string): TStrings;
+    { Nome exato da relacao no catalogo (grafia correta). }
+    function ResolveRelationName(const AName: string): string;
+    { Colunas da chave primaria (nova lista: liberar pelo chamador). }
+    function PrimaryKeyColumns(const ARelation: string): TStrings;
+    { Metadados dos campos de uma relacao (nova lista: liberar pelo chamador). }
+    function RelationFieldMetas(const ARelation: string): TFieldMetaArray;
     { Descarta os caches; chamar depois de DDL que mude o catalogo. }
     procedure ClearMetadataCache;
     property Connected: Boolean read GetConnected;
@@ -725,6 +731,115 @@ begin
 
   FFieldCache.AddObject(Rel, List);
   Result := List;
+end;
+
+function TIBStudioSession.ResolveRelationName(const AName: string): string;
+var
+  Idx: Integer;
+begin
+  Result := '';
+  if Trim(AName) = '' then
+    Exit;
+  Idx := RelationNames.IndexOf(Trim(AName));
+  if Idx >= 0 then
+    Result := FRelationNames[Idx]
+  else
+    Result := Trim(AName);
+end;
+
+function TIBStudioSession.PrimaryKeyColumns(const ARelation: string): TStrings;
+var
+  Q: TSQLQuery;
+  List: TStringList;
+  Rel: string;
+begin
+  Result := nil;
+  if (ARelation = '') or not FConn.Connected then
+    Exit;
+
+  Rel := ResolveRelationName(ARelation);
+  List := TStringList.Create;
+  try
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text :=
+        'select trim(seg.rdb$field_name) as nome ' +
+        'from rdb$relation_constraints rc ' +
+        'join rdb$indices idx on idx.rdb$index_name = rc.rdb$index_name ' +
+        'join rdb$index_segments seg on seg.rdb$index_name = idx.rdb$index_name ' +
+        'where rc.rdb$constraint_type = ''PRIMARY KEY'' ' +
+        'and rc.rdb$relation_name = :rel ' +
+        'order by seg.rdb$field_position';
+      Q.ParamByName('rel').AsString := Rel;
+      Q.Open;
+      while not Q.EOF do
+      begin
+        List.Add(Trim(Q.Fields[0].AsString));
+        Q.Next;
+      end;
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+  except
+    List.Free;
+    raise;
+  end;
+
+  Result := List;
+end;
+
+function TIBStudioSession.RelationFieldMetas(const ARelation: string): TFieldMetaArray;
+var
+  Q: TSQLQuery;
+  Rel: string;
+  Meta: TFieldMeta;
+  Count: Integer;
+begin
+  Result := nil;
+  if (ARelation = '') or not FConn.Connected then
+    Exit;
+
+  Rel := ResolveRelationName(ARelation);
+  Count := 0;
+  Q := TSQLQuery.Create(nil);
+  try
+    Q.DataBase := FConn;
+    Q.Transaction := FTx;
+    Q.SQL.Text :=
+      'select trim(rf.rdb$field_name) as nome, ' +
+      'cast(f.rdb$field_type as integer) as ftype, ' +
+      'cast(coalesce(f.rdb$field_sub_type, 0) as integer) as fsubtype, ' +
+      'cast(f.rdb$field_length as integer) as flen, ' +
+      'cast(coalesce(f.rdb$field_precision, 0) as integer) as fprec, ' +
+      'cast(coalesce(f.rdb$field_scale, 0) as integer) as fscale, ' +
+      'cast(coalesce(rf.rdb$null_flag, 0) as integer) as fnull ' +
+      'from rdb$relation_fields rf ' +
+      'join rdb$fields f on f.rdb$field_name = rf.rdb$field_source ' +
+      'where rf.rdb$relation_name = :rel ' +
+      'order by rf.rdb$field_position';
+    Q.ParamByName('rel').AsString := Rel;
+    Q.Open;
+    while not Q.EOF do
+    begin
+      Meta.Name := Trim(Q.Fields[0].AsString);
+      Meta.FieldType := Q.Fields[1].AsInteger;
+      Meta.SubType := Q.Fields[2].AsInteger;
+      Meta.Length := Q.Fields[3].AsInteger;
+      Meta.Precision := Q.Fields[4].AsInteger;
+      Meta.Scale := Q.Fields[5].AsInteger;
+      Meta.Nullable := Q.Fields[6].AsInteger <> 0;
+      Inc(Count);
+      SetLength(Result, Count);
+      Result[Count - 1] := Meta;
+      Q.Next;
+    end;
+    Q.Close;
+  finally
+    Q.Free;
+  end;
 end;
 
 end.

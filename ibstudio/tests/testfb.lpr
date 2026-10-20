@@ -11,7 +11,7 @@ program testfb;
 
 uses
   SysUtils, Classes, DB, sqldb, IBConnection, bufdataset,
-  ibtypes, ibsqlutil, ibmetadata, ibsession;
+  ibtypes, ibsqlutil, ibmetadata, ibdml, ibsession;
 
 var
   Failures: Integer = 0;
@@ -299,6 +299,99 @@ begin
   end;
 end;
 
+procedure TestDmlGeneration(AProfile: TConnectionProfile);
+var
+  S: TIBStudioSession;
+  Keys: TStrings;
+  Metas: TFieldMetaArray;
+  Fields, KeyVals: TFieldValueArray;
+  Q: TSQLQuery;
+  SQL: string;
+  N: Int64;
+  Antes: Integer;
+begin
+  WriteLn('--- edicao de dados (DML gerado) ---');
+  S := TIBStudioSession.Create;
+  try
+    S.Connect(AProfile);
+
+    Keys := S.PrimaryKeyColumns('TESTE_IBSTUDIO');
+    try
+      Check('chave primaria descoberta',
+        Assigned(Keys) and (Keys.Count = 1) and SameText(Keys[0], 'ID'),
+        Format('(%d colunas)', [Keys.Count]));
+    finally
+      Keys.Free;
+    end;
+
+    Metas := S.RelationFieldMetas('TESTE_IBSTUDIO');
+    Check('metadados dos campos', Length(Metas) = 6, Format('(%d)', [Length(Metas)]));
+
+    { Valor atual, para restaurar depois do teste. }
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := S.Connection;
+      Q.Transaction := S.Transaction;
+      Q.SQL.Text := 'select qtd from teste_ibstudio where id = 1';
+      Q.Open;
+      Antes := Q.Fields[0].AsInteger;
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+
+    SetLength(Fields, 1);
+    Fields[0].Name := 'QTD';
+    Fields[0].Value := '42';
+    Fields[0].IsNumeric := True;
+    SetLength(KeyVals, 1);
+    KeyVals[0].Name := 'ID';
+    KeyVals[0].Value := '1';
+    KeyVals[0].IsNumeric := True;
+
+    SQL := BuildUpdate('TESTE_IBSTUDIO', Fields, KeyVals);
+    N := S.Execute(SQL, nil, False);
+    Check('update gerado afetou 1 linha', N = 1, SQL);
+    S.Commit;
+
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := S.Connection;
+      Q.Transaction := S.Transaction;
+      Q.SQL.Text := 'select qtd from teste_ibstudio where id = 1';
+      Q.Open;
+      Check('valor gravado', Q.Fields[0].AsInteger = 42,
+        Q.Fields[0].AsString);
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+
+    { Restaura o valor original. }
+    Fields[0].Value := IntToStr(Antes);
+    S.Execute(BuildUpdate('TESTE_IBSTUDIO', Fields, KeyVals), nil, True);
+
+    { Insert e delete gerados a partir dos mesmos blocos. }
+    SetLength(Fields, 2);
+    Fields[0].Name := 'ID';
+    Fields[0].Value := '500';
+    Fields[0].IsNumeric := True;
+    Fields[1].Name := 'NOME';
+    Fields[1].Value := 'Inserido';
+    N := S.Execute(BuildInsert('TESTE_IBSTUDIO', Fields), nil, True);
+    Check('insert gerado afetou 1 linha', N = 1, Format('(%d)', [N]));
+
+    SetLength(KeyVals, 1);
+    KeyVals[0].Name := 'ID';
+    KeyVals[0].Value := '500';
+    KeyVals[0].IsNumeric := True;
+    N := S.Execute(BuildDelete('TESTE_IBSTUDIO', KeyVals), nil, True);
+    Check('delete gerado afetou 1 linha', N = 1, Format('(%d)', [N]));
+  finally
+    S.Free;
+  end;
+end;
+
 var
   Mode, Host, Port, DBFile, User, Pass: string;
   Profile: TConnectionProfile;
@@ -323,6 +416,7 @@ begin
       TestSession(Profile);
       TestExecutor(Profile);
       TestExecuteParams(Profile);
+      TestDmlGeneration(Profile);
     except
       on E: Exception do
       begin

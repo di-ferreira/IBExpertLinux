@@ -9,8 +9,8 @@ program uismoke;
 
 uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
-  Interfaces, Forms, SysUtils, Controls, ComCtrls, ExtCtrls,
-  ibtypes, ibsession, uMain, uSqlTab, uSqlPreview;
+  Interfaces, Forms, SysUtils, Classes, Controls, ComCtrls, ExtCtrls, DB, sqldb,
+  ibtypes, ibsession, uMain, uSqlTab, uSqlPreview, uEditRecord;
 
 var
   Failures: Integer = 0;
@@ -51,11 +51,41 @@ begin
   end;
 end;
 
+{ Le o nome do registro 1 direto do banco. }
+function RowName(const AProfile: TConnectionProfile): string;
+var
+  S: TIBStudioSession;
+  Q: TSQLQuery;
+begin
+  Result := '';
+  S := TIBStudioSession.Create;
+  try
+    S.Connect(AProfile);
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := S.Connection;
+      Q.Transaction := S.Transaction;
+      Q.SQL.Text := 'select nome from teste_ibstudio where id = 1';
+      Q.Open;
+      Result := Q.Fields[0].AsString;
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
 var
   Form: TfrmMain;
   Profile: TConnectionProfile;
   Tab: TSqlTabFrame;
   Preview: TfrmSqlPreview;
+  EditValues: TStringList;
+  DlgEdit: TfrmEditRecord;
+  Metas: TFieldMetaArray;
+  Init: TStringList;
   Wait, I: Integer;
   Folder, TableNode: TTreeNode;
   Allow, FoundTable: Boolean;
@@ -125,7 +155,71 @@ begin
         Check('tabela aberta com 3 linhas',
           Assigned(Tab) and (Tab.ResultRowCount = 3),
           Format('(%d)', [Tab.ResultRowCount]));
+
+        { Edicao de dados: altera o nome do registro 1 e confere no banco. }
+        if Assigned(Tab) then
+        begin
+          WriteLn('--- edicao de dados ---');
+          Check('aba reconhece a tabela editavel',
+            SameText(Tab.EditRelation, 'TESTE_IBSTUDIO'), Tab.EditRelation);
+
+          EditValues := TStringList.Create;
+          try
+            EditValues.Values['NOME'] := 'Editado';
+            Check('edicao aplicada', Tab.ApplyEdits(EditValues, nil));
+            Wait := 0;
+            while Tab.Busy and (Wait < 200) do
+            begin
+              PumpFor(50);
+              Inc(Wait);
+            end;
+            Check('valor gravado no banco', RowName(Profile) = 'Editado',
+              RowName(Profile) + ' | ' + Tab.LogText);
+
+            { Devolve o valor original para nao afetar outras execucoes. }
+            EditValues.Values['NOME'] := 'Ação';
+            Tab.ApplyEdits(EditValues, nil);
+            Wait := 0;
+            while Tab.Busy and (Wait < 200) do
+            begin
+              PumpFor(50);
+              Inc(Wait);
+            end;
+            Check('valor restaurado', RowName(Profile) = 'Ação',
+              RowName(Profile));
+          finally
+            EditValues.Free;
+          end;
+        end;
       end;
+    end;
+
+    WriteLn('--- dialogo de edicao ---');
+    DlgEdit := TfrmEditRecord.Create(nil);
+    try
+      Metas := nil;
+      SetLength(Metas, 2);
+      Metas[0].Name := 'ID';
+      Metas[0].FieldType := 8;
+      Metas[0].Nullable := False;
+      Metas[1].Name := 'NOME';
+      Metas[1].FieldType := 37;
+      Metas[1].Nullable := True;
+      DlgEdit.SetFields(Metas);
+      Init := TStringList.Create;
+      try
+        Init.Values['ID'] := '1';
+        Init.Values['NOME'] := 'Texto';
+        DlgEdit.SetValues(Init, nil);
+        Check('dialogo mostra o valor digitado',
+          DlgEdit.GetValues.Values['NOME'] = 'Texto');
+        Check('campo nao anulavel sem marca NULL',
+          DlgEdit.GetNullFields.Count = 0);
+      finally
+        Init.Free;
+      end;
+    finally
+      DlgEdit.Free;
     end;
 
     WriteLn('--- previa de SQL ---');

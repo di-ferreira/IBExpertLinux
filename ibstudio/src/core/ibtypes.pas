@@ -25,6 +25,18 @@ type
   end;
   TStatementArray = array of TStatement;
 
+  { Metadados de um campo de tabela, lidos do catalogo RDB$. }
+  TFieldMeta = record
+    Name: string;
+    FieldType: Integer;   { codigo de rdb$field_type }
+    SubType: Integer;
+    Length: Integer;
+    Precision: Integer;
+    Scale: Integer;
+    Nullable: Boolean;
+  end;
+  TFieldMetaArray = array of TFieldMeta;
+
   { Perfil de conexao informado pelo usuario. A senha nunca e persistida. }
   TConnectionProfile = class
   private
