@@ -72,6 +72,9 @@ begin
       '  obs blob sub_type text, ' +
       '  criado_em timestamp)';
     Q.ExecSQL;
+    { Alguns servidores so tornam a tabela visivel depois do commit do DDL. }
+    Tx.Commit;
+    Tx.StartTransaction;
     Q.SQL.Text :=
       'insert into teste_ibstudio (id, nome, valor, qtd, criado_em) values ' +
       '(1, ''Ação'', 10.50, 3, ''2024-01-02 03:04:05'')';
