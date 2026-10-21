@@ -179,10 +179,11 @@ begin
     Trim(AValue);
 end;
 
+{ O Firebird 2.5 nao aceita "START WITH" no CREATE SEQUENCE: o valor
+  inicial e definido depois, com SET GENERATOR. }
 function CreateGeneratorSQL(const AName, AValue: string): string;
 begin
-  Result := 'create sequence ' + QuoteIdentifier(AName) + ' start with ' +
-    Trim(AValue);
+  Result := 'create sequence ' + QuoteIdentifier(AName) + ';';
 end;
 
 function ErrorLineNumber(const AMessage: string): Integer;

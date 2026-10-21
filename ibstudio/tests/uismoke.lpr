@@ -11,7 +11,7 @@ uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
   Interfaces, Forms, SysUtils, Classes, Controls, ComCtrls, ExtCtrls, DB, sqldb,
   ibtypes, ibsession, ibcsv, ibddl, ibcode, uMain, uSqlTab, uSqlPreview,
-  uEditRecord, uTableEditor, uCodeEditor, uAdmin;
+  uEditRecord, uTableEditor, uCodeEditor, uAdmin, uExtract;
 
 var
   Failures: Integer = 0;
@@ -96,6 +96,7 @@ var
   M: TTableModel;
   Frame: TCodeEditorFrame;
   DlgAdmin: TfrmAdmin;
+  DlgExtract: TfrmExtract;
   Obj: TCodeObject;
   Err: string;
   Wait, I: Integer;
@@ -314,6 +315,24 @@ begin
         Check('dialogo administrativo criado', DlgAdmin.Visible = False);
       finally
         DlgAdmin.Free;
+      end;
+    finally
+      Sess.Free;
+    end;
+
+    WriteLn('--- extracao de metadados ---');
+    Sess := TIBStudioSession.Create;
+    try
+      Sess.Connect(Profile);
+      DlgExtract := TfrmExtract.Create(nil);
+      try
+        DlgExtract.SetSession(Sess);
+        DlgExtract.Generate;
+        Check('script de criacao gerado',
+          Pos('create table', DlgExtract.ScriptText) > 0,
+          Copy(DlgExtract.ScriptText, 1, 120));
+      finally
+        DlgExtract.Free;
       end;
     finally
       Sess.Free;

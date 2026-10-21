@@ -11,7 +11,7 @@ interface
 
 uses
   SysUtils, Classes, DB, sqldb, IBConnection, bufdataset, ibase60dyn,
-  ibtypes, ibsqlutil, ibmetadata, ibddl, ibcode;
+  ibtypes, ibsqlutil, ibmetadata, ibddl, ibcode, ibschema;
 
 type
   TIBStudioSession = class;
@@ -82,6 +82,8 @@ type
     function LoadTableModel(const ARelation: string): TTableModel;
     { Objeto de codigo lido do catalogo (procedure, trigger, view...). }
     function LoadCodeObject(AKind: TCodeKind; const AName: string): TCodeObject;
+    { Esquema completo do banco, para extracao e comparacao. }
+    function LoadSchemaModel: TSchemaModel;
     { Executa um unico comando, sem dividir o texto em varios. }
     function ExecuteStatement(const ASQL: string; out AError: string): Boolean;
     { Descarta os caches; chamar depois de DDL que mude o catalogo. }
@@ -1289,6 +1291,7 @@ begin
 
     ckException:
       begin
+        { A coluna da mensagem mudou de nome no Firebird 3.0. }
         try
           Result.Source := TryRead('select cast(rdb$exception_message as ' +
             'varchar(255)) as src from rdb$exceptions ' +
@@ -1296,6 +1299,14 @@ begin
         except
           Found := False;
         end;
+        if not Found then
+          try
+            Result.Source := TryRead('select cast(rdb$message as ' +
+              'varchar(255)) as src from rdb$exceptions ' +
+              'where rdb$exception_name = :name', Found);
+          except
+            Found := False;
+          end;
         Result.Exists := Found;
       end;
 
@@ -1343,9 +1354,319 @@ begin
   end;
 end;
 
-function TIBStudioSession.ExecuteStatement(const ASQL: string;
-  out AError: string): Boolean;
+function AddSep(const AValue: string): string;
 begin
+  if AValue = '' then
+    Exit('');
+  Result := ', ';
+end;
+
+function TIBStudioSession.LoadSchemaModel: TSchemaModel;
+var
+  Q: TSQLQuery;
+  Q2: TSQLQuery;
+  Names: TStringList;
+  I, Count: Integer;
+  D: TDomainModel;
+  E: TExceptionModel;
+  G: TGeneratorModel;
+  V: TViewModel;
+  Obj: TCodeObject;
+  Privs, S, PrivText: string;
+  Priv: Integer;
+  IsView: Boolean;
+
+  function ReadNames(const ASQL: string): TStringList;
+  var
+    Q2: TSQLQuery;
+    L: TStringList;
+  begin
+    L := TStringList.Create;
+    Q2 := TSQLQuery.Create(nil);
+    try
+      Q2.DataBase := FConn;
+      Q2.Transaction := FTx;
+      Q2.SQL.Text := ASQL;
+      Q2.Open;
+      while not Q2.EOF do
+      begin
+        L.Add(Trim(Q2.FieldByName('nome').AsString));
+        Q2.Next;
+      end;
+      Q2.Close;
+    finally
+      Q2.Free;
+    end;
+    Result := L;
+  end;
+
+begin
+  Result := NewSchemaModel;
+  if not FConn.Connected then
+    Exit;
+
+  { Dominios: no Firebird 2.5 sao os campos usados como tipo que nao sao
+    colunas de nenhuma tabela. }
+  Names := ReadNames(
+    'select distinct trim(rf.rdb$field_source) as nome ' +
+    'from rdb$relation_fields rf ' +
+    'where not exists (select 1 from rdb$relation_fields rf2 ' +
+    '  where rf2.rdb$field_name = rf.rdb$field_source)');
+  try
+    Count := 0;
+    for I := 0 to Names.Count - 1 do
+    begin
+      Q := TSQLQuery.Create(nil);
+      try
+        Q.DataBase := FConn;
+        Q.Transaction := FTx;
+        Q.SQL.Text :=
+          'select cast(rdb$field_type as integer) as ftype, ' +
+          'cast(coalesce(rdb$field_sub_type, 0) as integer) as fsubtype, ' +
+          'cast(rdb$field_length as integer) as flen, ' +
+          'cast(coalesce(rdb$field_precision, 0) as integer) as fprec, ' +
+          'cast(coalesce(rdb$field_scale, 0) as integer) as fscale, ' +
+          'cast(coalesce(rdb$description, '''') as varchar(255)) as descr ' +
+          'from rdb$fields where rdb$field_name = :name';
+        Q.ParamByName('name').AsString := Names[I];
+        Q.Open;
+        if not Q.EOF then
+        begin
+          D := Default(TDomainModel);
+          D.Name := Names[I];
+          D.TypeName := LowerCase(DescribeField(
+            Q.FieldByName('ftype').AsInteger,
+            Q.FieldByName('fsubtype').AsInteger,
+            Q.FieldByName('flen').AsInteger,
+            Q.FieldByName('fprec').AsInteger,
+            Q.FieldByName('fscale').AsInteger));
+          D.Description := Trim(Q.FieldByName('descr').AsString);
+          Inc(Count);
+          SetLength(Result.Domains, Count);
+          Result.Domains[Count - 1] := D;
+        end;
+        Q.Close;
+      finally
+        Q.Free;
+      end;
+    end;
+  finally
+    Names.Free;
+  end;
+
+  { Exceptions. }
+  Q := TSQLQuery.Create(nil);
+  try
+    Q.DataBase := FConn;
+    Q.Transaction := FTx;
+    try
+      Q.SQL.Text := 'select trim(rdb$exception_name) as nome, ' +
+        'cast(rdb$exception_message as varchar(255)) as msg ' +
+        'from rdb$exceptions';
+      Q.Open;
+    except
+      { No Firebird 2.5 a coluna se chama rdb$message. }
+      Q.SQL.Text := 'select trim(rdb$exception_name) as nome, ' +
+        'cast(rdb$message as varchar(255)) as msg from rdb$exceptions';
+      Q.Open;
+    end;
+    Count := 0;
+    while not Q.EOF do
+    begin
+      E := Default(TExceptionModel);
+      E.Name := Trim(Q.FieldByName('nome').AsString);
+      E.Message := Trim(Q.FieldByName('msg').AsString);
+      Inc(Count);
+      SetLength(Result.Exceptions, Count);
+      Result.Exceptions[Count - 1] := E;
+      Q.Next;
+    end;
+    Q.Close;
+  finally
+    Q.Free;
+  end;
+
+  { Geradores. }
+  Q := TSQLQuery.Create(nil);
+  try
+    Q.DataBase := FConn;
+    Q.Transaction := FTx;
+    Q.SQL.Text := 'select trim(rdb$generator_name) as nome from ' +
+      'rdb$generators where coalesce(rdb$system_flag, 0) = 0';
+    Q.Open;
+    Count := 0;
+    while not Q.EOF do
+    begin
+      G := Default(TGeneratorModel);
+      G.Name := Trim(Q.FieldByName('nome').AsString);
+      G.InitialValue := 0;
+      { O valor atual vem do gerador (o catalogo do 2.5 nao o guarda). }
+      Q2 := TSQLQuery.Create(nil);
+      try
+        Q2.DataBase := FConn;
+        Q2.Transaction := FTx;
+        Q2.SQL.Text := 'select cast(gen_id(' + QuoteIdentifier(G.Name) +
+          ', 0) as bigint) as v from rdb$database';
+        Q2.Open;
+        if not Q2.EOF then
+          G.InitialValue := Q2.FieldByName('v').AsLargeInt;
+        Q2.Close;
+      except
+        { Gerador sem valor legivel: fica com zero. }
+      end;
+      Q2.Free;
+      Inc(Count);
+      SetLength(Result.Generators, Count);
+      Result.Generators[Count - 1] := G;
+      Q.Next;
+    end;
+    Q.Close;
+  finally
+    Q.Free;
+  end;
+
+  { Tabelas e views. }
+  Q := TSQLQuery.Create(nil);
+  try
+    Q.DataBase := FConn;
+    Q.Transaction := FTx;
+    Q.SQL.Text :=
+      'select trim(rdb$relation_name) as nome, rdb$view_blr as vblr ' +
+      'from rdb$relations where coalesce(rdb$system_flag, 0) = 0';
+    Q.Open;
+    Count := 0;
+    while not Q.EOF do
+    begin
+      IsView := not Q.FieldByName('vblr').IsNull;
+      S := Trim(Q.FieldByName('nome').AsString);
+      if IsView then
+      begin
+        Obj := LoadCodeObject(ckView, S);
+        V := Default(TViewModel);
+        V.Name := S;
+        V.Source := Obj.Source;
+        V.Columns := nil;
+        Inc(Count);
+        SetLength(Result.Views, Count);
+        Result.Views[Count - 1] := V;
+      end
+      else
+      begin
+        Inc(Count);
+        SetLength(Result.Tables, Count);
+        Result.Tables[Count - 1] := LoadTableModel(S);
+      end;
+      Q.Next;
+    end;
+    Q.Close;
+  finally
+    Q.Free;
+  end;
+
+  { Procedures. }
+  Names := ReadNames('select trim(rdb$procedure_name) as nome from ' +
+    'rdb$procedures where coalesce(rdb$system_flag, 0) = 0');
+  try
+    Count := 0;
+    for I := 0 to Names.Count - 1 do
+    begin
+      Obj := LoadCodeObject(ckProcedure, Names[I]);
+      if not Obj.Exists then
+        Continue;
+      Inc(Count);
+      SetLength(Result.Procedures, Count);
+      Result.Procedures[Count - 1] := Obj;
+    end;
+  finally
+    Names.Free;
+  end;
+
+  { Triggers. }
+  Names := ReadNames('select trim(rdb$trigger_name) as nome from ' +
+    'rdb$triggers where coalesce(rdb$system_flag, 0) = 0');
+  try
+    Count := 0;
+    for I := 0 to Names.Count - 1 do
+    begin
+      Obj := LoadCodeObject(ckTrigger, Names[I]);
+      if not Obj.Exists then
+        Continue;
+      Inc(Count);
+      SetLength(Result.Triggers, Count);
+      Result.Triggers[Count - 1] := Obj;
+    end;
+  finally
+    Names.Free;
+  end;
+
+  { Grants de tabela (priviligios por usuario). }
+  Q := TSQLQuery.Create(nil);
+  try
+    Q.DataBase := FConn;
+    Q.Transaction := FTx;
+    try
+      Q.SQL.Text :=
+        'select trim(rdb$user_name) as uname, trim(rdb$relation_name) as tname, ' +
+        'cast(rdb$privilege_type as varchar(20)) as priv ' +
+        'from rdb$user_privileges where rdb$relation_name is not null';
+      Q.Open;
+    except
+      { No Firebird 2.5 as colunas se chamam rdb$user e rdb$privilege. }
+      Q.SQL.Text :=
+        'select trim(rdb$user) as uname, trim(rdb$relation_name) as tname, ' +
+        'cast(rdb$privilege as varchar(20)) as priv ' +
+        'from rdb$user_privileges where rdb$relation_name is not null';
+      Q.Open;
+    end;
+    Count := 0;
+    while not Q.EOF do
+    begin
+      { No 2.5 o privilegio e uma letra (S, I, U, D, R); no 3.0 e uma
+        mascara de bits. }
+      PrivText := Trim(Q.FieldByName('priv').AsString);
+      Privs := '';
+      if PrivText <> '' then
+        if (PrivText[1] >= '0') and (PrivText[1] <= '9') then
+        begin
+          Priv := StrToIntDef(PrivText, 0);
+          if (Priv and 1) <> 0 then
+            Privs := Privs + 'SELECT';
+          if (Priv and 2) <> 0 then
+            Privs := Privs + AddSep(Privs) + 'INSERT';
+          if (Priv and 4) <> 0 then
+            Privs := Privs + AddSep(Privs) + 'UPDATE';
+          if (Priv and 8) <> 0 then
+            Privs := Privs + AddSep(Privs) + 'DELETE';
+          if (Priv and 16) <> 0 then
+            Privs := Privs + AddSep(Privs) + 'REFERENCES';
+        end
+        else
+          case PrivText[1] of
+            'S': Privs := 'SELECT';
+            'I': Privs := 'INSERT';
+            'U': Privs := 'UPDATE';
+            'D': Privs := 'DELETE';
+            'R': Privs := 'REFERENCES';
+            'E', 'X': Privs := 'EXECUTE';
+          end;
+      if Privs <> '' then
+      begin
+        Inc(Count);
+        SetLength(Result.Grants, Count);
+        Result.Grants[Count - 1] := 'grant ' + Privs + ' on ' +
+          QuoteIdentifier(Q.FieldByName('tname').AsString) + ' to ' +
+          QuoteIdentifier(Q.FieldByName('uname').AsString) + ';';
+      end;
+      Q.Next;
+    end;
+    Q.Close;
+  finally
+    Q.Free;
+  end;
+end;
+
+function TIBStudioSession.ExecuteStatement(const ASQL: string;
+  out AError: string): Boolean;begin
   AError := '';
   Result := False;
   try

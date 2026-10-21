@@ -12,7 +12,7 @@ program testfb;
 uses
   SysUtils, Classes, DB, sqldb, IBConnection, bufdataset,
   ibtypes, ibsqlutil, ibmetadata, ibdml, ibcsv, ibddl, ibcode, ibtools,
-  ibsession;
+  ibschema, ibextract, ibsession;
 
 var
   Failures: Integer = 0;
@@ -725,6 +725,47 @@ begin
   DeleteFile(NewDb);
 end;
 
+procedure TestExtract(AProfile: TConnectionProfile);
+var
+  S: TIBStudioSession;
+  Model: TSchemaModel;
+  Options: TExtractOptions;
+  Script: TStringArray;
+  Text, Err: string;
+  I: Integer;
+begin
+  WriteLn('--- extracao de metadados ---');
+  S := TIBStudioSession.Create;
+  try
+    S.Connect(AProfile);
+    S.ExecuteStatement(
+      'create or alter procedure PROC_EXTR as begin exit; end', Err);
+    S.ExecuteStatement(
+      'create or alter trigger TRG_EXTR for TESTE_IBSTUDIO after insert ' +
+      'as begin end', Err);
+
+    Model := S.LoadSchemaModel;
+    Check('tabelas no modelo', Length(Model.Tables) >= 1,
+      Format('(%d)', [Length(Model.Tables)]));
+
+    DefaultExtractOptions(Options);
+    Script := ExtractScript(Model, Options);
+    Text := '';
+    for I := 0 to High(Script) do
+      Text := Text + Script[I] + LineEnding;
+
+    Check('tabela no script', Pos('create table TESTE_IBSTUDIO', Text) > 0);
+    Check('procedure no script', Pos('create or alter procedure PROC_EXTR', Text) > 0);
+    Check('trigger no script', Pos('create or alter trigger TRG_EXTR', Text) > 0);
+    Check('evento do trigger no script', Pos('after insert', Text) > 0);
+
+    S.ExecuteStatement('drop trigger TRG_EXTR', Err);
+    S.ExecuteStatement('drop procedure PROC_EXTR', Err);
+  finally
+    S.Free;
+  end;
+end;
+
 var
   Mode, Host, Port, DBFile, User, Pass: string;
   Profile: TConnectionProfile;
@@ -754,6 +795,7 @@ begin
       TestTableEditor(Profile);
       TestCodeEditor(Profile);
       TestAdminTools(Profile);
+      TestExtract(Profile);
     except
       on E: Exception do
       begin

@@ -10,7 +10,7 @@ uses
   Graphics, Dialogs, LCLType,
   ibtypes, ibsqlutil, ibmetadata, ibsettings, ibcsv, ibddl, ibcode, ibsession,
   uConnect, uSqlTab, uSqlPreview, uCsvOptions, uImportCsv, uTableEditor,
-  uCodeEditor, uAdmin;
+  uCodeEditor, uAdmin, uExtract, uCompare;
 
 type
   TfrmMain = class(TForm)
@@ -45,6 +45,8 @@ type
     procedure MenuImportCsvClick(Sender: TObject);
     procedure MenuNewTableClick(Sender: TObject);
     procedure MenuAdminClick(Sender: TObject);
+    procedure MenuExtractClick(Sender: TObject);
+    procedure MenuCompareClick(Sender: TObject);
     procedure EditStructureClick(Sender: TObject);
     procedure EditCodeClick(Sender: TObject);
     procedure NewCodeClick(Sender: TObject);
@@ -231,6 +233,16 @@ begin
   MFerramentas := TMenuItem.Create(Main);
   MFerramentas.Caption := '&Ferramentas';
   Main.Items.Add(MFerramentas);
+
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Extrair metadados...';
+  Item.OnClick := @MenuExtractClick;
+  MFerramentas.Add(Item);
+
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Comparar esquemas...';
+  Item.OnClick := @MenuCompareClick;
+  MFerramentas.Add(Item);
 
   Item := TMenuItem.Create(Main);
   Item.Caption := 'Prévia de SQL...';
@@ -786,6 +798,46 @@ begin
   try
     Dlg.SetSession(FSession);
     Dlg.SetTask(TAdminTask(TMenuItem(Sender).Tag));
+    Dlg.ShowModal;
+  finally
+    Dlg.Free;
+  end;
+end;
+
+procedure TfrmMain.MenuExtractClick(Sender: TObject);
+var
+  Dlg: TfrmExtract;
+begin
+  if not FSession.Connected then
+  begin
+    MessageDlg('Sem conexao', 'Conecte-se a um banco antes de extrair os ' +
+      'metadados.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+
+  Dlg := TfrmExtract.Create(Self);
+  try
+    Dlg.SetSession(FSession);
+    Dlg.ShowModal;
+  finally
+    Dlg.Free;
+  end;
+end;
+
+procedure TfrmMain.MenuCompareClick(Sender: TObject);
+var
+  Dlg: TfrmCompare;
+begin
+  if not FSession.Connected then
+  begin
+    MessageDlg('Sem conexao', 'Conecte-se a um banco antes de comparar.',
+      mtInformation, [mbOK], 0);
+    Exit;
+  end;
+
+  Dlg := TfrmCompare.Create(Self);
+  try
+    Dlg.SetSession(FSession);
     Dlg.ShowModal;
   finally
     Dlg.Free;
