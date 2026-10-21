@@ -29,14 +29,39 @@ contém código do IBExpert.
 - **Ajustes persistentes** (host, porta, banco, usuário, charset, dialeto) em
   arquivo INI — a senha nunca é gravada.
 
-## O que ainda não existe (v2)
+## O que a v2 acrescentou
 
-Edição na grade, editores de DDL (tabela/procedure/trigger), comparação de
-bancos, backup/restore, depurador de procedures, monitor e recursos de IA.
-O catálogo completo do que o IBExpert faz está em `recon/FUNCIONALIDADES.md`.
+- **Edição de dados na grade**: botões *Novo*, *Editar*, *Excluir* e *Copiar
+  INSERT* na aba de dados (só em consultas simples sobre uma tabela), com
+  diálogo de registro, geração de `INSERT`/`UPDATE`/`DELETE` e recarrega
+  automática do resultado.
+- **Exportação e importação de CSV**: exportação do resultado com opções
+  (separador, cabeçalho, texto de NULL, codificação) e importação com prévia,
+  correspondência automática coluna → campo e inserção em transação.
+- **Editor de tabela**: campos, chave primária, índices e chaves estrangeiras
+  com prévia do script DDL e execução com confirmação.
+- **Editores de código**: procedure, trigger, view, domain, exception e
+  generator, com compilação (F9), mensagens do servidor e destaque da linha do
+  erro, além de salvar/carregar `.sql`.
+- **Administração**: backup, restore, validação e estatísticas com `gbak`,
+  `gfix` e `gstat` (usuário e senha por variável de ambiente).
+- **Extração de metadados**: script completo de criação do banco (um arquivo
+  ou um por objeto) e **comparador de esquemas** com script de sincronização.
+- **Assistente do editor**: descrição do objeto sob o cursor, parâmetros das
+  procedures no autocompletar, templates e snippets (`Ctrl+J`), formatação de
+  SQL e histórico de comandos por banco.
+- **Usuários e permissões**: usuários, papéis, concessão/revogação de
+  privilégios e lista de sessões ativas.
 
 O plano de implementação da v2 está em `docs/plano/`: visão geral por fases
 (`00-plano-geral.md`), uma spec por fase, e o andamento em `PROGRESSO.md`.
+
+## O que ainda não existe
+
+Depurador de procedures, monitor contínuo de SQL, comparador de *dados* (não de
+esquema), gerador de dados, construtor visual de consultas, relatório de
+metadados e recursos de IA.
+O catálogo completo do que o IBExpert faz está em `recon/FUNCIONALIDADES.md`.
 
 ## Estrutura
 
@@ -47,10 +72,37 @@ ibstudio/
     ibsqlutil.pas   divisão de scripts e detecção do tipo de comando
     ibmetadata.pas  SQL do catálogo (RDB$) e descrição de tipos
     ibsession.pas   conexão, executor em thread e carga de metadados
+    ibsettings.pas  preferências (INI) e snippets do usuário
+    ibdml.pas       geração de INSERT/UPDATE/DELETE
+    ibddl.pas       modelo de tabela e scripts CREATE/ALTER/DROP
+    ibcode.pas      comandos dos editores de código (procedure, trigger...)
+    ibschema.pas    modelo do esquema do banco
+    ibextract.pas   script de criação do banco
+    ibcompare.pas   comparação de esquemas e script de sincronização
+    ibcsv.pas       leitura e escrita de CSV
+    ibformat.pas    formatação de SQL
+    ibtemplates.pas templates e snippets
+    ibdescribe.pas  análise do texto sob o cursor
+    ibhistory.pas   histórico de comandos por banco
+    ibsecurity.pas  usuários, papéis e privilégios
+    ibtools.pas     ferramentas administrativas (gbak, gfix, gstat)
   src/ui/         interface (LCL)
     uMain.pas       janela principal, árvore e abas
     uSqlTab.pas     editor + grade + mensagens + thread de consulta
     uConnect.pas    diálogo de conexão
+    uEditRecord.pas edição de um registro
+    uTableEditor.pas  editor de estrutura de tabela
+    uCodeEditor.pas   editor de procedure/trigger/view
+    uExtract.pas      extração de metadados
+    uCompare.pas      comparador de esquemas
+    uImportCsv.pas    importação de CSV
+    uCsvOptions.pas   opções de CSV
+    uAdmin.pas        backup/restore/validação/estatísticas
+    uSecurity.pas     usuários, papéis e privilégios
+    uSessions.pas     sessões ativas
+    uHistory.pas      histórico de comandos
+    uSnippets.pas     snippets do usuário
+    uSqlPreview.pas   prévia de SQL
   tests/          testes automatizados
 ```
 
