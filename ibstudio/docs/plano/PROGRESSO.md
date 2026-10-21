@@ -14,7 +14,7 @@ mudar de estado). O plano completo está em `00-plano-geral.md`.
 | 4 | [Editores de código](fase-04-editores-codigo.md) | concluída | 2026-10-20 | 2026-10-20 | `9d39873` |
 | 5 | [Administração](fase-05-administracao.md) | concluída | 2026-10-20 | 2026-10-20 | `bec0f65` |
 | 6 | [Extração/comparador](fase-06-extracao-comparador.md) | concluída | 2026-10-21 | 2026-10-21 | `e6c8725` |
-| 7 | [Assistente do editor](fase-07-assistente-editor.md) | pendente | — | — | — |
+| 7 | [Assistente do editor](fase-07-assistente-editor.md) | concluída | 2026-10-21 | 2026-10-21 | `2dca159` |
 | 8 | [Usuários/grants](fase-08-usuarios-grants.md) | pendente | — | — | — |
 
 Legenda de status: `pendente`, `em andamento`, `concluída`, `bloqueada`
@@ -256,8 +256,39 @@ feito. Se algo ficar para depois, registrar como pendência da fase seguinte.
     colunas de nenhuma tabela (no 2.5 não existe `rdb$types`).
 
 ### Fase 7 — Assistente do editor
-- Status: pendente
-- Observações: —
+- Status: concluída (2026-10-21, commit `2dca159`)
+- Entregue:
+  - `src/core/ibdescribe.pas`: análise do texto sob o cursor
+    (`ObjectBeforeCursor`, `WordAt`, `QualifierBeforeDot`,
+    `ProcedureCallBefore`).
+  - `src/core/ibformat.pas`: `FormatSql` (palavras-chave em maiúsculas e
+    indentação por blocos).
+  - `src/core/ibtemplates.pas`: templates padrão (`sel`, `ins`, `upd`,
+    `proc`, `trig`) e expansão dos marcadores `&Author`, `&Date`, `&Time`,
+    `&Database` e `&Cursor`.
+  - `src/core/ibhistory.pas`: histórico de comandos por banco (arquivo
+    próprio, até 100 comandos por banco).
+  - `src/core/ibsession.pas`: `DescriptionOf` (descrição de tabela/campo, com
+    cache por conexão) e `ProcedureParameters`.
+  - `src/core/ibsettings.pas`: snippets do usuário (`nome=texto`).
+  - `src/ui/uSqlTab.pas`: painel do assistente (objeto sob o cursor +
+    descrição), parâmetros da procedure no autocompletar, `Ctrl+J` (templates
+    e snippets), *Formatar SQL* e o aviso de execução para o histórico.
+  - `src/ui/uHistory.pas` e `src/ui/uSnippets.pas`: diálogos de histórico e de
+    snippets; menus *Editar > Formatar SQL*, *Editar > Snippets…* e
+    *Consulta > Histórico…*.
+- Testes: `tc_format.pas` (4 casos), `tc_templates.pas` (4) e `tc_describe.pas`
+  (5; núcleo = 98), bloco `assistente do editor` no `testfb.lpr` (parâmetros e
+  descrição lidos do catálogo) e no `uismoke.lpr` (o assistente identifica o
+  campo sob o cursor e o SQL é formatado).
+- Verificação: `make check`, `make test` (98/98), `make testfb` e `make
+  uismoke` verdes.
+- Observações/desvios:
+  - A descrição da coluna está em `rdb$relation_fields` no Firebird 2.5 e em
+    `rdb$fields` no 3.0: a leitura tenta as duas.
+  - A posição do cursor no LCL é 1-based (`SelStart`), o que exigiu ajustar
+    o posicionamento usado pelos testes.
+  - O histórico é gravado a cada execução de script (últimos 100 por banco).
 
 ### Fase 8 — Usuários e grants
 - Status: pendente
