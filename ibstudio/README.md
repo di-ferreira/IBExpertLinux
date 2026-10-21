@@ -63,6 +63,29 @@ esquema), gerador de dados, construtor visual de consultas, relatório de
 metadados e recursos de IA.
 O catálogo completo do que o IBExpert faz está em `recon/FUNCIONALIDADES.md`.
 
+## Atalhos
+
+| Atalho | Ação |
+|---|---|
+| `F5` | executa o script da aba atual |
+| `Ctrl+Enter` | executa o script da aba atual |
+| `Ctrl+Espaço` | abre a lista de autocompletar |
+| `Ctrl+J` | abre os templates e snippets |
+| `F9` | compila o código do editor de procedure/trigger/view |
+| `Esc` | fecha os diálogos |
+
+## Menus
+
+- **Arquivo** — Conectar, Desconectar, Sair.
+- **Consulta** — Nova aba, Executar, Completar código, Fechar aba, Exportar
+  CSV, Importar CSV, Histórico.
+- **Banco** — Nova tabela.
+- **Serviços** — Backup, Restaurar, Validação, Estatísticas, Usuários e
+  permissões, Sessões ativas.
+- **Ferramentas** — Extrair metadados, Comparar esquemas, Prévia de SQL.
+- **Editar** — Formatar SQL, Snippets.
+- **Ajuda** — Sobre.
+
 ## Estrutura
 
 ```
