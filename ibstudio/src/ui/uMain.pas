@@ -8,9 +8,10 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, StdCtrls, ExtCtrls, ComCtrls, Menus,
   Graphics, Dialogs, LCLType,
-  ibtypes, ibsqlutil, ibmetadata, ibsettings, ibcsv, ibddl, ibcode, ibsession,
+  ibtypes, ibsqlutil, ibmetadata, ibsettings, ibcsv, ibddl, ibcode, ibhistory,
+  ibsession,
   uConnect, uSqlTab, uSqlPreview, uCsvOptions, uImportCsv, uTableEditor,
-  uCodeEditor, uAdmin, uExtract, uCompare;
+  uCodeEditor, uAdmin, uExtract, uCompare, uHistory, uSnippets;
 
 type
   TfrmMain = class(TForm)
@@ -20,6 +21,7 @@ type
     FTabs: TPageControl;
     FStatus: TStatusBar;
     FSettings: TStudioSettings;
+    FHistory: TCommandHistory;
     FLblConn: TLabel;
     FNewTabBtn: TButton;
     FCloseTabBtn: TButton;
@@ -47,6 +49,10 @@ type
     procedure MenuAdminClick(Sender: TObject);
     procedure MenuExtractClick(Sender: TObject);
     procedure MenuCompareClick(Sender: TObject);
+    procedure MenuFormatSqlClick(Sender: TObject);
+    procedure MenuHistoryClick(Sender: TObject);
+    procedure MenuSnippetsClick(Sender: TObject);
+    procedure RecordScript(const AScript: string);
     procedure EditStructureClick(Sender: TObject);
     procedure EditCodeClick(Sender: TObject);
     procedure NewCodeClick(Sender: TObject);
@@ -99,12 +105,14 @@ begin
   FSession := TIBStudioSession.Create;
   FSettings := TStudioSettings.Create(SettingsFile);
   FSettings.Load;
+  FHistory := TCommandHistory.Create(ChangeFileExt(SettingsFile, '.history'));
   BuildUi;
   UpdateStatus;
 end;
 
 destructor TfrmMain.Destroy;
 begin
+  FHistory.Free;
   FSession.Free;
   FSettings.Free;
   inherited Destroy;
@@ -126,7 +134,8 @@ var
   LeftPanel: TPanel;
   Splitter: TSplitter;
   Main: TMainMenu;
-  MFile, MQuery, MFerramentas, MBanco, MServicos, MHelp, Item: TMenuItem;
+  MFile, MQuery, MFerramentas, MBanco, MServicos, MEditar, MHelp,
+  Item: TMenuItem;
 begin
   Caption := 'IBStudio';
   Width := 1100;
@@ -193,6 +202,11 @@ begin
   Item.OnClick := @MenuImportCsvClick;
   MQuery.Add(Item);
 
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Historico...';
+  Item.OnClick := @MenuHistoryClick;
+  MQuery.Add(Item);
+
   MBanco := TMenuItem.Create(Main);
   MBanco.Caption := '&Banco';
   Main.Items.Add(MBanco);
@@ -243,6 +257,20 @@ begin
   Item.Caption := 'Comparar esquemas...';
   Item.OnClick := @MenuCompareClick;
   MFerramentas.Add(Item);
+
+  MEditar := TMenuItem.Create(Main);
+  MEditar.Caption := '&Editar';
+  Main.Items.Add(MEditar);
+
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Formatar SQL';
+  Item.OnClick := @MenuFormatSqlClick;
+  MEditar.Add(Item);
+
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Snippets...';
+  Item.OnClick := @MenuSnippetsClick;
+  MEditar.Add(Item);
 
   Item := TMenuItem.Create(Main);
   Item.Caption := 'Prévia de SQL...';
@@ -839,6 +867,67 @@ begin
   try
     Dlg.SetSession(FSession);
     Dlg.ShowModal;
+  finally
+    Dlg.Free;
+  end;
+end;
+
+procedure TfrmMain.RecordScript(const AScript: string);
+begin
+  if not Assigned(FHistory) then
+    Exit;
+  FHistory.Add(FSettings.Profile.Database, AScript);
+end;
+
+procedure TfrmMain.MenuFormatSqlClick(Sender: TObject);
+var
+  Tab: TSqlTabFrame;
+begin
+  Tab := ActiveTab;
+  if Assigned(Tab) then
+    Tab.FormatSqlNow;
+end;
+
+procedure TfrmMain.MenuHistoryClick(Sender: TObject);
+var
+  Dlg: TfrmHistory;
+  Tab: TSqlTabFrame;
+  Items: TStringList;
+begin
+  Tab := ActiveTab;
+  if not Assigned(Tab) then
+    Exit;
+  Dlg := TfrmHistory.Create(Self);
+  try
+    Items := FHistory.Items(FSettings.Profile.Database);
+    try
+      Dlg.SetItems(Items);
+    finally
+      Items.Free;
+    end;
+    if Dlg.ShowModal = mrOk then
+      Tab.InsertText(Dlg.SelectedText);
+  finally
+    Dlg.Free;
+  end;
+end;
+
+procedure TfrmMain.MenuSnippetsClick(Sender: TObject);
+var
+  Dlg: TfrmSnippets;
+  I: Integer;
+begin
+  Dlg := TfrmSnippets.Create(Self);
+  try
+    Dlg.SetSnippets(FSettings.Snippets);
+    if Dlg.ShowModal = mrOk then
+    begin
+      FSettings.Snippets.Assign(Dlg.Snippets);
+      FSettings.Save;
+      for I := 0 to FTabs.PageCount - 1 do
+        if FTabs.Pages[I].ControlCount > 0 then
+          TSqlTabFrame(FTabs.Pages[I].Controls[0]).SetSnippets(FSettings.Snippets);
+    end;
   finally
     Dlg.Free;
   end;

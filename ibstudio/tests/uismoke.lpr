@@ -338,6 +338,21 @@ begin
       Sess.Free;
     end;
 
+    WriteLn('--- assistente do editor ---');
+    Tab := Form.ActiveTab;
+    if Assigned(Tab) then
+    begin
+      Tab.SetSqlText('select nome from teste_ibstudio');
+      PumpFor(150);
+      Tab.SetCaretPosition(1, 12);
+      Tab.RefreshAssistant;
+      PumpFor(700);
+      Check('assistente identifica o campo',
+        Pos('NOME', UpperCase(Tab.AssistantText)) > 0, Tab.AssistantText);
+      Tab.FormatSqlNow;
+      Check('sql formatado', Pos('SELECT', Tab.SqlText) > 0, Tab.SqlText);
+    end;
+
     WriteLn('--- previa de SQL ---');
     Preview := TfrmSqlPreview.Create(nil);
     try

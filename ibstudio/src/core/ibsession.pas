@@ -49,6 +49,7 @@ type
     FRelationNames: TStringList;
     FRelationNamesLoaded: Boolean;
     FFieldCache: TStringList;
+    FDescriptionCache: TStringList;
     function GetConnected: Boolean;
   public
     constructor Create;
@@ -82,6 +83,10 @@ type
     function LoadTableModel(const ARelation: string): TTableModel;
     { Objeto de codigo lido do catalogo (procedure, trigger, view...). }
     function LoadCodeObject(AKind: TCodeKind; const AName: string): TCodeObject;
+    { Descricao de um campo (ou da tabela, quando AColumn e vazio). }
+    function DescriptionOf(const ATable, AColumn: string): string;
+    { Parametros de uma procedure, na ordem do catalogo. }
+    function ProcedureParameters(const AName: string): TStringArray;
     { Esquema completo do banco, para extracao e comparacao. }
     function LoadSchemaModel: TSchemaModel;
     { Executa um unico comando, sem dividir o texto em varios. }
@@ -454,6 +459,9 @@ begin
   FFieldCache := TStringList.Create;
   FFieldCache.Sorted := True;
   FFieldCache.CaseSensitive := False;
+
+  FDescriptionCache := TStringList.Create;
+  FDescriptionCache.NameValueSeparator := #1;
 end;
 
 destructor TIBStudioSession.Destroy;
@@ -461,6 +469,7 @@ begin
   Disconnect;
   ClearMetadataCache;
   FFieldCache.Free;
+  FDescriptionCache.Free;
   FRelationNames.Free;
   FTx.Free;
   FConn.Free;
@@ -719,6 +728,8 @@ begin
   end;
   if Assigned(FRelationNames) then
     FRelationNames.Clear;
+  if Assigned(FDescriptionCache) then
+    FDescriptionCache.Clear;
   FRelationNamesLoaded := False;
 end;
 
@@ -1359,6 +1370,106 @@ begin
   if AValue = '' then
     Exit('');
   Result := ', ';
+end;
+
+function TIBStudioSession.DescriptionOf(const ATable, AColumn: string): string;
+var
+  Q: TSQLQuery;
+  Key: string;
+  Value: string;
+  Position: Integer;
+begin
+  Result := '';
+  if (ATable = '') or not FConn.Connected then
+    Exit;
+
+  if AColumn = '' then
+    Key := 'T:' + UpperCase(ATable)
+  else
+    Key := 'C:' + UpperCase(ATable) + '.' + UpperCase(AColumn);
+
+  Position := FDescriptionCache.IndexOf(Key);
+  if Position >= 0 then
+  begin
+    Result := FDescriptionCache.ValueFromIndex[Position];
+    Exit;
+  end;
+
+  Q := TSQLQuery.Create(nil);
+  try
+    Q.DataBase := FConn;
+    Q.Transaction := FTx;
+    if AColumn = '' then
+    begin
+      Q.SQL.Text := 'select cast(coalesce(rdb$description, '''') as ' +
+        'varchar(255)) as descr from rdb$relations ' +
+        'where rdb$relation_name = :name';
+      Q.ParamByName('name').AsString := ResolveRelationName(ATable);
+      Q.Open;
+    end
+    else
+    begin
+      { No Firebird 2.5 a descricao da coluna esta em rdb$relation_fields;
+        no 3.0 ela foi para rdb$fields. }
+      try
+        Q.SQL.Text := 'select cast(coalesce(rf.rdb$description, '''') as ' +
+          'varchar(255)) as descr from rdb$relation_fields rf ' +
+          'where rf.rdb$relation_name = :name and rf.rdb$field_name = :field';
+        Q.ParamByName('name').AsString := ResolveRelationName(ATable);
+        Q.ParamByName('field').AsString := AColumn;
+        Q.Open;
+      except
+        Q.SQL.Text := 'select cast(coalesce(f.rdb$description, '''') as ' +
+          'varchar(255)) as descr from rdb$relation_fields rf ' +
+          'join rdb$fields f on f.rdb$field_name = rf.rdb$field_source ' +
+          'where rf.rdb$relation_name = :name and rf.rdb$field_name = :field';
+        Q.ParamByName('name').AsString := ResolveRelationName(ATable);
+        Q.ParamByName('field').AsString := AColumn;
+        Q.Open;
+      end;
+    end;
+    if not Q.EOF then
+      Value := Trim(Q.FieldByName('descr').AsString);
+    Q.Close;
+  finally
+    Q.Free;
+  end;
+
+  FDescriptionCache.Values[Key] := Value;
+  Result := Value;
+end;
+
+function TIBStudioSession.ProcedureParameters(const AName: string): TStringArray;
+var
+  Q: TSQLQuery;
+  I, Count: Integer;
+begin
+  Result := nil;
+  Count := 0;
+  if (AName = '') or not FConn.Connected then
+    Exit;
+
+  Q := TSQLQuery.Create(nil);
+  try
+    Q.DataBase := FConn;
+    Q.Transaction := FTx;
+    Q.SQL.Text :=
+      'select trim(rdb$parameter_name) as nome from rdb$procedure_parameters ' +
+      'where rdb$procedure_name = :name ' +
+      'order by rdb$parameter_type, rdb$parameter_number';
+    Q.ParamByName('name').AsString := AName;
+    Q.Open;
+    while not Q.EOF do
+    begin
+      Inc(Count);
+      SetLength(Result, Count);
+      Result[Count - 1] := Trim(Q.FieldByName('nome').AsString);
+      Q.Next;
+    end;
+    Q.Close;
+  finally
+    Q.Free;
+  end;
 end;
 
 function TIBStudioSession.LoadSchemaModel: TSchemaModel;

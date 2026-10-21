@@ -766,6 +766,44 @@ begin
   end;
 end;
 
+procedure TestAssistant(AProfile: TConnectionProfile);
+var
+  S: TIBStudioSession;
+  Params: TStringArray;
+  Err, Desc: string;
+begin
+  WriteLn('--- assistente do editor ---');
+  S := TIBStudioSession.Create;
+  try
+    S.Connect(AProfile);
+
+    S.ExecuteStatement(
+      'create or alter procedure PROC_ASSIST (p1 integer, p2 varchar(10)) ' +
+      'as begin exit; end', Err);
+    S.ExecuteStatement(
+      'comment on procedure PROC_ASSIST is ''procedura de teste''', Err);
+    S.ExecuteStatement(
+      'comment on column TESTE_IBSTUDIO.NOME is ''nome do cliente''', Err);
+
+    Params := S.ProcedureParameters('PROC_ASSIST');
+    Check('parametros da procedure', Length(Params) = 2,
+      Format('(%d)', [Length(Params)]));
+    if Length(Params) = 2 then
+      Check('ordem dos parametros', SameText(Params[0], 'P1') and
+        SameText(Params[1], 'P2'), Params[0] + ',' + Params[1]);
+
+    Desc := S.DescriptionOf('TESTE_IBSTUDIO', 'NOME');
+    Check('descricao do campo', Desc = 'nome do cliente', Desc);
+
+    Desc := S.DescriptionOf('TESTE_IBSTUDIO', '');
+    Check('descricao vazia quando nao existe', Desc = '', Desc);
+
+    S.ExecuteStatement('drop procedure PROC_ASSIST', Err);
+  finally
+    S.Free;
+  end;
+end;
+
 var
   Mode, Host, Port, DBFile, User, Pass: string;
   Profile: TConnectionProfile;
@@ -796,6 +834,7 @@ begin
       TestCodeEditor(Profile);
       TestAdminTools(Profile);
       TestExtract(Profile);
+      TestAssistant(Profile);
     except
       on E: Exception do
       begin

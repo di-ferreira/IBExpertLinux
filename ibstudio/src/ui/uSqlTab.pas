@@ -9,9 +9,10 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, StdCtrls, ExtCtrls, ComCtrls, DBGrids, DB,
+  Menus,
   Graphics, Dialogs, LCLType, ClipBrD, SynEdit, SynEditTypes, SynEditHighlighter,
   SynCompletion, SynHighlighterSQL, bufdataset, ibtypes, ibsqlutil, ibmetadata,
-  ibdml, ibcsv, ibsession, uEditRecord;
+  ibdml, ibcsv, ibcode, ibdescribe, ibformat, ibtemplates, ibsession, uEditRecord;
 
 type
   TQueryThread = class;
@@ -39,12 +40,22 @@ type
     FPanelEditor: TPanel;
     FCompletion: TSynCompletion;
     FAutoTimer: TTimer;
+    FAssistant: TLabel;
+    FAssistTimer: TTimer;
+    FOnExecute: TScriptEvent;
+    FTemplates: TPopupMenu;
+    FSnippets: TStringList;
     FEditRelation: string;
     procedure BuildUi;
     procedure BtnRunClick(Sender: TObject);
     procedure BtnStopClick(Sender: TObject);
     procedure EditorKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure EditorKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure AssistTimerTick(Sender: TObject);
+    procedure UpdateAssistant;
+    procedure ShowTemplates;
+    procedure TemplateClick(Sender: TObject);
+    procedure InsertTemplate(const AName: string);
     procedure AutoTimerTick(Sender: TObject);
     function CaretInStringOrComment: Boolean;
     procedure CompletionExecute(Sender: TObject);
@@ -86,6 +97,20 @@ type
     property EditRelation: string read FEditRelation;
     { Texto do painel de mensagens (usado nos testes). }
     function LogText: string;
+    { Formata o SQL do editor (palavras-chave e indentacao). }
+    procedure FormatSqlNow;
+    { Callback executado quando um script e enviado ao banco. }
+    procedure SetExecuteHandler(AHandler: TScriptEvent);
+    { Snippets do usuario (lista "nome=texto"). }
+    procedure SetSnippets(const ASnippets: TStrings);
+    { Insere um texto no editor, na posicao do cursor. }
+    procedure InsertText(const AText: string);
+    { Posiciona o cursor (usado pelos testes e pelo assistente). }
+    procedure SetCaretPosition(ALine, AColumn: Integer);
+    { Texto do assistente (objeto sob o cursor). }
+    function AssistantText: string;
+    { Atualiza o assistente na hora. }
+    procedure RefreshAssistant;
     { Exporta o resultado atual para um arquivo CSV. }
     function ExportCsv(const AFileName: string; const AOptions: TCsvOptions): Integer;
     { Aplica edicoes de campos no registro atual (usado pelo dialogo e pelos
@@ -331,6 +356,15 @@ begin
   FAutoTimer.Enabled := False;
   FAutoTimer.OnTimer := @AutoTimerTick;
 
+  { O assistente mostra o objeto sob o cursor e a sua descricao. }
+  FAssistTimer := TTimer.Create(Self);
+  FAssistTimer.Interval := 400;
+  FAssistTimer.Enabled := True;
+  FAssistTimer.OnTimer := @AssistTimerTick;
+
+  FTemplates := TPopupMenu.Create(Self);
+  FSnippets := TStringList.Create;
+
   Splitter := TSplitter.Create(Self);
   Splitter.Parent := Self;
   Splitter.Align := alTop;
@@ -351,6 +385,15 @@ begin
   FGrid.Options := [dgTitles, dgIndicator, dgColumnResize, dgColLines,
     dgRowLines, dgRowSelect, dgAlwaysShowSelection];
   FGrid.TitleFont.Style := [fsBold];
+
+  { O assistente fica acima das mensagens. }
+  FAssistant := TLabel.Create(Self);
+  FAssistant.Parent := Bottom;
+  FAssistant.Align := alTop;
+  FAssistant.Height := 20;
+  FAssistant.Caption := '';
+  FAssistant.Font.Color := clGray;
+  FAssistant.Font.Style := [fsBold];
 
   FMsg := TMemo.Create(Self);
   FMsg.Parent := Bottom;
@@ -438,9 +481,10 @@ end;
 
 procedure TSqlTabFrame.CompletionExecute(Sender: TObject);
 var
-  Contexto: string;
+  Contexto, ProcName: string;
   Req: TCompletionRequest;
   Relations: TStringArray;
+  Params: TStringArray;
   Rel: string;
   I: Integer;
 begin
@@ -449,7 +493,20 @@ begin
     FCompletion.ItemList.Clear;
     try
       Contexto := TextUpToCaret;
+      { Depois do abre parenteses de uma procedure, lista os parametros. }
+      ProcName := ProcedureCallBefore(Contexto, Length(Contexto));
+      if ProcName <> '' then
+      begin
+        if Assigned(FSession) then
+        begin
+          Params := FSession.ProcedureParameters(ProcName);
+          for I := 0 to High(Params) do
+            AddItem(Params[I]);
+        end;
+      end
+      else
       Req := CompletionRequestAt(Contexto);
+      if ProcName = '' then
       case Req.Kind of
         ckRelation:
           begin
@@ -532,6 +589,7 @@ end;
 
 procedure TSqlTabFrame.EditorKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
 begin
+  UpdateAssistant;
   if FCompletion.IsActive then
     Exit;
   if (FEditor.CaretX > 1) and
@@ -606,6 +664,199 @@ begin
   FMsg.Lines.Add(S);
 end;
 
+procedure TSqlTabFrame.AssistTimerTick(Sender: TObject);
+begin
+  UpdateAssistant;
+end;
+
+procedure TSqlTabFrame.UpdateAssistant;
+var
+  Contexto, Obj, Tabela, Campo, Desc, Qual: string;
+  P: Integer;
+begin
+  if not Assigned(FAssistant) then
+    Exit;
+  Contexto := TextUpToCaret;
+  Obj := ObjectBeforeCursor(Contexto);
+  if Obj = '' then
+  begin
+    FAssistant.Caption := '';
+    Exit;
+  end;
+
+  Tabela := '';
+  Campo := '';
+  P := Pos('.', Obj);
+  if P > 0 then
+  begin
+    Qual := Copy(Obj, 1, P - 1);
+    Campo := Copy(Obj, P + 1, MaxInt);
+    { O apelido e resolvido pelo texto do comando. }
+    Tabela := ResolveRelationQualifier(Contexto, Qual);
+    if Tabela = '' then
+      Tabela := Qual;
+  end
+  else
+    Tabela := Obj;
+
+  Desc := '';
+  if Assigned(FSession) and FSession.Connected then
+    Desc := FSession.DescriptionOf(Tabela, Campo);
+
+  if Desc <> '' then
+  begin
+    if Campo <> '' then
+      FAssistant.Caption := Tabela + '.' + Campo + ' : ' + Desc
+    else
+      FAssistant.Caption := Tabela + ' : ' + Desc;
+  end
+  else if Campo <> '' then
+    FAssistant.Caption := Tabela + '.' + Campo
+  else
+    FAssistant.Caption := Tabela;
+end;
+
+function TSqlTabFrame.AssistantText: string;
+begin
+  Result := FAssistant.Caption;
+end;
+
+procedure TSqlTabFrame.RefreshAssistant;
+begin
+  UpdateAssistant;
+end;
+
+procedure TSqlTabFrame.FormatSqlNow;
+begin
+  FEditor.Lines.Text := FormatSql(FEditor.Lines.Text);
+end;
+
+procedure TSqlTabFrame.SetExecuteHandler(AHandler: TScriptEvent);
+begin
+  FOnExecute := AHandler;
+end;
+
+procedure TSqlTabFrame.SetCaretPosition(ALine, AColumn: Integer);
+var
+  Offset, I: Integer;
+begin
+  { No LCL a selecao comeca na posicao 1; a coluna indica a letra que
+    fica depois do cursor. }
+  Offset := 0;
+  for I := 1 to ALine - 1 do
+    if I <= FEditor.Lines.Count then
+      Offset := Offset + Length(FEditor.Lines[I]) + 1;
+  Offset := Offset + AColumn;
+  FEditor.SelStart := Offset;
+  FEditor.SelEnd := Offset;
+end;
+
+procedure TSqlTabFrame.InsertText(const AText: string);
+var
+  Inicio: Integer;
+begin
+  if AText = '' then
+    Exit;
+  Inicio := FEditor.SelStart;
+  FEditor.SelStart := Inicio;
+  FEditor.SelEnd := Inicio;
+  FEditor.SelText := AText;
+end;
+
+procedure TSqlTabFrame.SetSnippets(const ASnippets: TStrings);
+begin
+  if FSnippets = nil then
+    FSnippets := TStringList.Create
+  else
+    FSnippets.Assign(ASnippets);
+end;
+
+procedure TSqlTabFrame.ShowTemplates;
+var
+  T: TTemplateArray;
+  I: Integer;
+  Item: TMenuItem;
+  P: TPoint;
+begin
+  FTemplates.Items.Clear;
+  T := DefaultTemplates;
+  for I := 0 to High(T) do
+  begin
+    Item := TMenuItem.Create(FTemplates);
+    Item.Caption := T[I].Name;
+    Item.Tag := I;
+    Item.OnClick := @TemplateClick;
+    Item.Hint := T[I].Text;
+    FTemplates.Items.Add(Item);
+  end;
+  { Os snippets do usuario entram no mesmo menu. }
+  for I := 0 to FSnippets.Count - 1 do
+  begin
+    Item := TMenuItem.Create(FTemplates);
+    Item.Caption := FSnippets.Names[I];
+    Item.Hint := FSnippets.ValueFromIndex[I];
+    Item.OnClick := @TemplateClick;
+    FTemplates.Items.Add(Item);
+  end;
+  P := FEditor.ClientToScreen(Point(FEditor.CaretXPix,
+    FEditor.CaretYPix + FEditor.LineHeight));
+  FTemplates.Popup(P.X, P.Y);
+end;
+
+procedure TSqlTabFrame.TemplateClick(Sender: TObject);
+begin
+  InsertTemplate(TMenuItem(Sender).Caption);
+end;
+
+procedure TSqlTabFrame.InsertTemplate(const AName: string);
+var
+  T: TTemplateArray;
+  I, CursorPos, Inicio: Integer;
+  Conteudo, Autor, Banco: string;
+begin
+  T := DefaultTemplates;
+  for I := 0 to High(T) do
+    if SameText(T[I].Name, AName) then
+    begin
+      Autor := GetEnvironmentVariable('USER');
+      if Autor = '' then
+        Autor := GetEnvironmentVariable('USERNAME');
+      Banco := '';
+      if Assigned(FSession) then
+        Banco := FSession.Profile.Database;
+      Conteudo := ExpandTemplate(T[I].Text, Autor, Banco, CursorPos);
+      { Insere no ponto do cursor e deixa o cursor onde o &Cursor estava. }
+      Inicio := FEditor.SelStart;
+      FEditor.SelStart := Inicio;
+      FEditor.SelEnd := Inicio;
+      FEditor.SelText := Conteudo;
+      FEditor.SelStart := Inicio + CursorPos;
+      FEditor.SelEnd := Inicio + CursorPos;
+      Exit;
+    end;
+  { Snippet do usuario. }
+  for I := 0 to FSnippets.Count - 1 do
+    if SameText(FSnippets.Names[I], AName) then
+    begin
+      Autor := GetEnvironmentVariable('USER');
+      if Autor = '' then
+        Autor := GetEnvironmentVariable('USERNAME');
+      Banco := '';
+      if Assigned(FSession) then
+        Banco := FSession.Profile.Database;
+      Conteudo := ExpandTemplate(FSnippets.ValueFromIndex[I], Autor, Banco,
+        CursorPos);
+      Inicio := FEditor.SelStart;
+      FEditor.SelStart := Inicio;
+      FEditor.SelEnd := Inicio;
+      FEditor.SelText := Conteudo;
+      FEditor.SelStart := Inicio + CursorPos;
+      FEditor.SelEnd := Inicio + CursorPos;
+      Exit;
+    end;
+  LogMessage('Template nao encontrado: ' + AName);
+end;
+
 function TSqlTabFrame.LogText: string;
 begin
   Result := FMsg.Text;
@@ -660,6 +911,11 @@ begin
   begin
     Key := 0;
     ExecuteScript;
+  end
+  else if (Key = VK_J) and (ssCtrl in Shift) then
+  begin
+    Key := 0;
+    ShowTemplates;
   end;
 end;
 
@@ -684,6 +940,8 @@ begin
 
   FMsg.Clear;
   FMsg.Lines.Add(Format('%d comando(s) para executar.', [Length(Statements)]));
+  if Assigned(FOnExecute) then
+    FOnExecute(FEditor.Lines.Text);
   SetBusy(True);
 
   FThread := TQueryThread.Create(FProfile, Statements, 5000);

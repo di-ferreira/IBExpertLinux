@@ -9,6 +9,9 @@ uses
   SysUtils, Classes, Generics.Collections;
 
 type
+  { Callback com o texto executado no editor. }
+  TScriptEvent = procedure(const AScript: string) of object;
+
   { Tipo sintatico de um comando SQL isolado. }
   TStatementKind = (
     skEmpty,

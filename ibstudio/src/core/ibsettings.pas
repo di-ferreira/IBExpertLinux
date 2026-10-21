@@ -21,6 +21,7 @@ type
     FFileName: string;
     FProfile: TConnectionProfile;
     FLastDirectory: string;
+    FSnippets: TStringList;
     procedure SetDefaults;
   public
     constructor Create(const AFileName: string);
@@ -33,6 +34,8 @@ type
     property Profile: TConnectionProfile read FProfile;
     { Ultima pasta usada em abrir/salvar (exportacao, scripts). }
     property LastDirectory: string read FLastDirectory write FLastDirectory;
+    { Snippets do usuario: lista "nome=texto" (nao liberar). }
+    property Snippets: TStringList read FSnippets;
   end;
 
 implementation
@@ -41,11 +44,13 @@ constructor TStudioSettings.Create(const AFileName: string);
 begin
   inherited Create;
   FFileName := AFileName;
+  FSnippets := TStringList.Create;
   SetDefaults;
 end;
 
 destructor TStudioSettings.Destroy;
 begin
+  FSnippets.Free;
   FProfile.Free;
   inherited Destroy;
 end;
@@ -65,6 +70,9 @@ end;
 procedure TStudioSettings.Load;
 var
   Ini: TIniFile;
+  L: TStringList;
+  S: string;
+  I, P: Integer;
 begin
   SetDefaults;
   if (FFileName = '') or not FileExists(FFileName) then
@@ -79,6 +87,24 @@ begin
     FProfile.Charset := Ini.ReadString(SettingsSection, 'charset', FProfile.Charset);
     FProfile.Dialect := Ini.ReadInteger(SettingsSection, 'dialeto', FProfile.Dialect);
     FLastDirectory := Ini.ReadString(GeneralSection, 'ultima_pasta', '');
+    FSnippets.Clear;
+    S := Ini.ReadString('snippets', 'itens', '');
+    if S <> '' then
+    begin
+      L := TStringList.Create;
+      try
+        L.Text := S;
+        for I := 0 to L.Count - 1 do
+        begin
+          P := Pos(#1, L[I]);
+          if P > 0 then
+            FSnippets.Values[Copy(L[I], 1, P - 1)] :=
+              Copy(L[I], P + 1, MaxInt);
+        end;
+      finally
+        L.Free;
+      end;
+    end;
   finally
     Ini.Free;
   end;
@@ -87,7 +113,8 @@ end;
 procedure TStudioSettings.Save;
 var
   Ini: TIniFile;
-  Dir: string;
+  Dir, S: string;
+  I: Integer;
 begin
   if FFileName = '' then
     Exit;
@@ -108,6 +135,10 @@ begin
       Ini.WriteString(GeneralSection, 'ultima_pasta', FLastDirectory)
     else
       Ini.DeleteKey(GeneralSection, 'ultima_pasta');
+    S := '';
+    for I := 0 to FSnippets.Count - 1 do
+      S := S + FSnippets.Names[I] + #1 + FSnippets.ValueFromIndex[I] + #10;
+    Ini.WriteString('snippets', 'itens', S);
   finally
     Ini.Free;
   end;
