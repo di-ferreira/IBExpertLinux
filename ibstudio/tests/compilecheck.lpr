@@ -7,7 +7,7 @@ program compilecheck;
 uses
   ibtypes, ibsqlutil, ibmetadata, ibsettings, ibdml, ibcsv, ibddl, ibcode,
   ibtools, ibschema, ibextract, ibcompare, ibformat, ibtemplates, ibdescribe,
-  ibhistory, ibsession;
+  ibhistory, ibsecurity, ibsession;
 
 begin
 end.

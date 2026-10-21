@@ -11,7 +11,8 @@ uses
   {$IFDEF UNIX}cthreads,{$ENDIF}
   Interfaces, Forms, SysUtils, Classes, Controls, ComCtrls, ExtCtrls, DB, sqldb,
   ibtypes, ibsession, ibcsv, ibddl, ibcode, uMain, uSqlTab, uSqlPreview,
-  uEditRecord, uTableEditor, uCodeEditor, uAdmin, uExtract;
+  uEditRecord, uTableEditor, uCodeEditor, uAdmin, uExtract, uSecurity,
+  uSessions;
 
 var
   Failures: Integer = 0;
@@ -97,6 +98,8 @@ var
   Frame: TCodeEditorFrame;
   DlgAdmin: TfrmAdmin;
   DlgExtract: TfrmExtract;
+  DlgSecurity: TfrmSecurity;
+  DlgSessions: TfrmSessions;
   Obj: TCodeObject;
   Err: string;
   Wait, I: Integer;
@@ -351,6 +354,28 @@ begin
         Pos('NOME', UpperCase(Tab.AssistantText)) > 0, Tab.AssistantText);
       Tab.FormatSqlNow;
       Check('sql formatado', Pos('SELECT', Tab.SqlText) > 0, Tab.SqlText);
+    end;
+
+    WriteLn('--- usuarios e sessoes ---');
+    Sess := TIBStudioSession.Create;
+    try
+      Sess.Connect(Profile);
+      DlgSecurity := TfrmSecurity.Create(nil);
+      try
+        DlgSecurity.SetSession(Sess);
+        Check('dialogo de usuarios criado', DlgSecurity.Visible = False);
+      finally
+        DlgSecurity.Free;
+      end;
+      DlgSessions := TfrmSessions.Create(nil);
+      try
+        DlgSessions.SetSession(Sess);
+        Check('dialogo de sessoes criado', DlgSessions.Visible = False);
+      finally
+        DlgSessions.Free;
+      end;
+    finally
+      Sess.Free;
     end;
 
     WriteLn('--- previa de SQL ---');

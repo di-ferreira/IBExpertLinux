@@ -12,7 +12,7 @@ program testfb;
 uses
   SysUtils, Classes, DB, sqldb, IBConnection, bufdataset,
   ibtypes, ibsqlutil, ibmetadata, ibdml, ibcsv, ibddl, ibcode, ibtools,
-  ibschema, ibextract, ibsession;
+  ibschema, ibextract, ibsecurity, ibsession;
 
 var
   Failures: Integer = 0;
@@ -804,6 +804,65 @@ begin
   end;
 end;
 
+procedure TestSecurity(AProfile: TConnectionProfile);
+var
+  S: TIBStudioSession;
+  Err: string;
+  L: TStringList;
+  I: Integer;
+  Found: Boolean;
+begin
+  WriteLn('--- usuarios e permissoes ---');
+  S := TIBStudioSession.Create;
+  try
+    S.Connect(AProfile);
+
+    Check('papel criado',
+      S.ExecuteStatement(BuildCreateRoleSQL('PAPEL_TESTE'), Err), Err);
+    Check('grant aplicado', S.ExecuteStatement(
+      BuildGrantSQL('table', 'TESTE_IBSTUDIO', 'SELECT', 'PAPEL_TESTE', nil,
+        False), Err), Err);
+
+    L := S.ListObjectPrivileges('TESTE_IBSTUDIO');
+    try
+      Found := False;
+      for I := 0 to L.Count - 1 do
+        if Pos('PAPEL_TESTE', L[I]) > 0 then
+          Found := True;
+      Check('privilegio concedido', Found, L.Text);
+    finally
+      L.Free;
+    end;
+
+    Check('revoke aplicado', S.ExecuteStatement(
+      BuildRevokeSQL('table', 'TESTE_IBSTUDIO', 'SELECT', 'PAPEL_TESTE', nil),
+      Err), Err);
+    Check('papel removido',
+      S.ExecuteStatement(BuildDropRoleSQL('PAPEL_TESTE'), Err), Err);
+
+    L := S.ListUsers;
+    try
+      Check('lista de usuarios', L.Count >= 1, Format('(%d)', [L.Count]));
+    finally
+      L.Free;
+    end;
+    L := S.ListRoles;
+    try
+      Check('lista de papeis obtida', L.Count >= 0);
+    finally
+      L.Free;
+    end;
+    L := S.ActiveSessions;
+    try
+      Check('sessoes ativas listadas', L.Count >= 1, Format('(%d)', [L.Count]));
+    finally
+      L.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
 var
   Mode, Host, Port, DBFile, User, Pass: string;
   Profile: TConnectionProfile;
@@ -835,6 +894,7 @@ begin
       TestAdminTools(Profile);
       TestExtract(Profile);
       TestAssistant(Profile);
+      TestSecurity(Profile);
     except
       on E: Exception do
       begin

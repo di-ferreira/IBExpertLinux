@@ -11,7 +11,8 @@ uses
   ibtypes, ibsqlutil, ibmetadata, ibsettings, ibcsv, ibddl, ibcode, ibhistory,
   ibsession,
   uConnect, uSqlTab, uSqlPreview, uCsvOptions, uImportCsv, uTableEditor,
-  uCodeEditor, uAdmin, uExtract, uCompare, uHistory, uSnippets;
+  uCodeEditor, uAdmin, uExtract, uCompare, uHistory, uSnippets, uSecurity,
+  uSessions;
 
 type
   TfrmMain = class(TForm)
@@ -52,6 +53,8 @@ type
     procedure MenuFormatSqlClick(Sender: TObject);
     procedure MenuHistoryClick(Sender: TObject);
     procedure MenuSnippetsClick(Sender: TObject);
+    procedure MenuSecurityClick(Sender: TObject);
+    procedure MenuSessionsClick(Sender: TObject);
     procedure RecordScript(const AScript: string);
     procedure EditStructureClick(Sender: TObject);
     procedure EditCodeClick(Sender: TObject);
@@ -242,6 +245,18 @@ begin
   Item.Caption := 'Estatisticas do banco...';
   Item.Tag := Ord(atStats);
   Item.OnClick := @MenuAdminClick;
+  MServicos.Add(Item);
+
+  MServicos.AddSeparator;
+
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Usuarios e permissoes...';
+  Item.OnClick := @MenuSecurityClick;
+  MServicos.Add(Item);
+
+  Item := TMenuItem.Create(Main);
+  Item.Caption := 'Sessoes ativas...';
+  Item.OnClick := @MenuSessionsClick;
   MServicos.Add(Item);
 
   MFerramentas := TMenuItem.Create(Main);
@@ -928,6 +943,46 @@ begin
         if FTabs.Pages[I].ControlCount > 0 then
           TSqlTabFrame(FTabs.Pages[I].Controls[0]).SetSnippets(FSettings.Snippets);
     end;
+  finally
+    Dlg.Free;
+  end;
+end;
+
+procedure TfrmMain.MenuSecurityClick(Sender: TObject);
+var
+  Dlg: TfrmSecurity;
+begin
+  if not FSession.Connected then
+  begin
+    MessageDlg('Sem conexao', 'Conecte-se a um banco antes.', mtInformation,
+      [mbOK], 0);
+    Exit;
+  end;
+
+  Dlg := TfrmSecurity.Create(Self);
+  try
+    Dlg.SetSession(FSession);
+    Dlg.ShowModal;
+  finally
+    Dlg.Free;
+  end;
+end;
+
+procedure TfrmMain.MenuSessionsClick(Sender: TObject);
+var
+  Dlg: TfrmSessions;
+begin
+  if not FSession.Connected then
+  begin
+    MessageDlg('Sem conexao', 'Conecte-se a um banco antes.', mtInformation,
+      [mbOK], 0);
+    Exit;
+  end;
+
+  Dlg := TfrmSessions.Create(Self);
+  try
+    Dlg.SetSession(FSession);
+    Dlg.ShowModal;
   finally
     Dlg.Free;
   end;

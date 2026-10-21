@@ -11,7 +11,7 @@ interface
 
 uses
   SysUtils, Classes, DB, sqldb, IBConnection, bufdataset, ibase60dyn,
-  ibtypes, ibsqlutil, ibmetadata, ibddl, ibcode, ibschema;
+  ibtypes, ibsqlutil, ibmetadata, ibddl, ibcode, ibschema, ibsecurity;
 
 type
   TIBStudioSession = class;
@@ -89,6 +89,13 @@ type
     function ProcedureParameters(const AName: string): TStringArray;
     { Esquema completo do banco, para extracao e comparacao. }
     function LoadSchemaModel: TSchemaModel;
+    { Usuarios e papeis do servidor (liberar a lista). }
+    function ListUsers: TStringList;
+    function ListRoles: TStringList;
+    { Privilegios de um objeto (linhas "usuario:objeto:privilegios"). }
+    function ListObjectPrivileges(const AObjectName: string): TStringList;
+    { Sessoes ativas (mon$attachments). }
+    function ActiveSessions: TStringList;
     { Executa um unico comando, sem dividir o texto em varios. }
     function ExecuteStatement(const ASQL: string; out AError: string): Boolean;
     { Descarta os caches; chamar depois de DDL que mude o catalogo. }
@@ -1467,6 +1474,178 @@ begin
       Q.Next;
     end;
     Q.Close;
+  finally
+    Q.Free;
+  end;
+end;
+
+function TIBStudioSession.ListUsers: TStringList;
+var
+  Q: TSQLQuery;
+begin
+  Result := TStringList.Create;
+  Result.Sorted := True;
+  Result.Duplicates := dupIgnore;
+  if not FConn.Connected then
+    Exit;
+
+  Q := TSQLQuery.Create(nil);
+  try
+    Q.DataBase := FConn;
+    Q.Transaction := FTx;
+    try
+      Q.SQL.Text := 'select trim(sec$user_name) as nome from sec$users';
+      Q.Open;
+    except
+      { No Firebird 2.5 os usuarios vem dos privilegios. }
+      Q.SQL.Text := 'select distinct trim(rdb$user) as nome ' +
+        'from rdb$user_privileges where rdb$user_type = 8';
+      Q.Open;
+    end;
+    while not Q.EOF do
+    begin
+      if Trim(Q.FieldByName('nome').AsString) <> '' then
+        Result.Add(Trim(Q.FieldByName('nome').AsString));
+      Q.Next;
+    end;
+    Q.Close;
+  finally
+    Q.Free;
+  end;
+end;
+
+function TIBStudioSession.ListRoles: TStringList;
+var
+  Q: TSQLQuery;
+begin
+  Result := TStringList.Create;
+  Result.Sorted := True;
+  Result.Duplicates := dupIgnore;
+  if not FConn.Connected then
+    Exit;
+
+  Q := TSQLQuery.Create(nil);
+  try
+    Q.DataBase := FConn;
+    Q.Transaction := FTx;
+    try
+      Q.SQL.Text := 'select trim(sec$role_name) as nome from sec$roles';
+      Q.Open;
+    except
+      Q.SQL.Text := 'select trim(rdb$role_name) as nome from rdb$roles';
+      Q.Open;
+    end;
+    while not Q.EOF do
+    begin
+      if Trim(Q.FieldByName('nome').AsString) <> '' then
+        Result.Add(Trim(Q.FieldByName('nome').AsString));
+      Q.Next;
+    end;
+    Q.Close;
+  finally
+    Q.Free;
+  end;
+end;
+
+function TIBStudioSession.ListObjectPrivileges(const AObjectName: string): TStringList;
+var
+  Q: TSQLQuery;
+  Grantee, Privs, Priv: string;
+begin
+  Result := TStringList.Create;
+  if not FConn.Connected then
+    Exit;
+
+  Q := TSQLQuery.Create(nil);
+  try
+    Q.DataBase := FConn;
+    Q.Transaction := FTx;
+    try
+      Q.SQL.Text := 'select trim(rdb$user_name) as grantee, ' +
+        'rdb$relation_name as obj, ' +
+        'cast(rdb$privilege_type as integer) as priv ' +
+        'from rdb$user_privileges where rdb$relation_name = :name';
+      Q.ParamByName('name').AsString := AObjectName;
+      Q.Open;
+    except
+      { No Firebird 2.5 o privilegio e uma letra. }
+      Q.SQL.Text := 'select trim(rdb$user) as grantee, rdb$relation_name as obj, ' +
+        'rdb$privilege as priv from rdb$user_privileges ' +
+        'where rdb$relation_name = :name';
+      Q.ParamByName('name').AsString := AObjectName;
+      Q.Open;
+    end;
+    while not Q.EOF do
+    begin
+      Grantee := Trim(Q.FieldByName('grantee').AsString);
+      Priv := Trim(Q.FieldByName('priv').AsString);
+      Privs := '';
+      if Priv <> '' then
+        if (Priv[1] >= '0') and (Priv[1] <= '9') then
+        begin
+          if (StrToIntDef(Priv, 0) and 1) <> 0 then
+            Privs := Privs + 'SELECT';
+          if (StrToIntDef(Priv, 0) and 2) <> 0 then
+            Privs := Privs + AddSep(Privs) + 'INSERT';
+          if (StrToIntDef(Priv, 0) and 4) <> 0 then
+            Privs := Privs + AddSep(Privs) + 'UPDATE';
+          if (StrToIntDef(Priv, 0) and 8) <> 0 then
+            Privs := Privs + AddSep(Privs) + 'DELETE';
+          if (StrToIntDef(Priv, 0) and 16) <> 0 then
+            Privs := Privs + AddSep(Privs) + 'REFERENCES';
+        end
+        else
+          case Priv[1] of
+            'S': Privs := 'SELECT';
+            'I': Privs := 'INSERT';
+            'U': Privs := 'UPDATE';
+            'D': Privs := 'DELETE';
+            'R': Privs := 'REFERENCES';
+            'E', 'X': Privs := 'EXECUTE';
+          end;
+      if (Grantee <> '') and (Privs <> '') then
+        Result.Add(FormatPrivilegeLine(Grantee, AObjectName, Privs));
+      Q.Next;
+    end;
+    Q.Close;
+  finally
+    Q.Free;
+  end;
+end;
+
+function TIBStudioSession.ActiveSessions: TStringList;
+var
+  Q: TSQLQuery;
+  Line: string;
+begin
+  Result := TStringList.Create;
+  if not FConn.Connected then
+    Exit;
+
+  Q := TSQLQuery.Create(nil);
+  try
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text := 'select mon$attachment_id as id, mon$user as usr, ' +
+        'mon$stat_id as stat, mon$remote_address as addr ' +
+        'from mon$attachments';
+      Q.Open;
+      while not Q.EOF do
+      begin
+        Line := Format('%-4s %-12s %-6s %s',
+          [Q.FieldByName('id').AsString,
+           Q.FieldByName('usr').AsString,
+           Q.FieldByName('stat').AsString,
+           Q.FieldByName('addr').AsString]);
+        Result.Add(Line);
+        Q.Next;
+      end;
+      Q.Close;
+    except
+      { O monitor pode estar desativado no servidor. }
+      Result.Add('(nao foi possivel ler as sessoes ativas)');
+    end;
   finally
     Q.Free;
   end;
