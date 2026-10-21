@@ -15,7 +15,7 @@ mudar de estado). O plano completo está em `00-plano-geral.md`.
 | 5 | [Administração](fase-05-administracao.md) | concluída | 2026-10-20 | 2026-10-20 | `bec0f65` |
 | 6 | [Extração/comparador](fase-06-extracao-comparador.md) | concluída | 2026-10-21 | 2026-10-21 | `e6c8725` |
 | 7 | [Assistente do editor](fase-07-assistente-editor.md) | concluída | 2026-10-21 | 2026-10-21 | `2dca159` |
-| 8 | [Usuários/grants](fase-08-usuarios-grants.md) | pendente | — | — | — |
+| 8 | [Usuários/grants](fase-08-usuarios-grants.md) | concluída | 2026-10-21 | 2026-10-21 | `f04bdc8` |
 
 Legenda de status: `pendente`, `em andamento`, `concluída`, `bloqueada`
 (com o motivo no registro abaixo).
@@ -291,5 +291,31 @@ feito. Se algo ficar para depois, registrar como pendência da fase seguinte.
   - O histórico é gravado a cada execução de script (últimos 100 por banco).
 
 ### Fase 8 — Usuários e grants
-- Status: pendente
-- Observações: —
+- Status: concluída (2026-10-21, commit `f04bdc8`)
+- Entregue:
+  - `src/core/ibsecurity.pas`: `BuildGrantSQL` (por objeto e por coluna, com
+    `with grant option`), `BuildRevokeSQL`, `BuildCreateUserSQL`,
+    `BuildAlterUserSQL`, `BuildDropUserSQL`, `BuildCreateRoleSQL`,
+    `BuildDropRoleSQL` e `PrivilegeName`.
+  - `src/core/ibsession.pas`: `ListUsers`, `ListRoles`,
+    `ListObjectPrivileges` e `ActiveSessions` (mon$attachments).
+  - `src/ui/uSecurity.pas`: diálogo em abas (Usuários, Papéis, Privilégios)
+    com criação/alteração/exclusão e concessão/revogação.
+  - `src/ui/uSessions.pas`: lista das sessões ativas.
+  - `src/ui/uMain.pas`: menus *Serviços > Usuários e permissões…* e
+    *Serviços > Sessões ativas…*.
+- Testes: `tc_security.pas` (6 casos; núcleo = 104), bloco `usuarios e
+  permissoes` no `testfb.lpr` (cria um papel, concede, confere em
+  `rdb$user_privileges`, revoga e remove; lista usuários, papéis e sessões) e
+  no `uismoke.lpr` (os dois diálogos são criados).
+- Verificação: `make check`, `make test` (104/104), `make testfb` e `make
+  uismoke` verdes.
+- Observações/desvios:
+  - O Firebird 2.5 não tem `sec$users`/`sec$roles`: a leitura usa
+    `rdb$user_privileges` e `rdb$roles` (com tentativa automática das
+    tabelas do 3.0).
+  - No 2.5 o privilégio é uma letra (`S`, `I`, `U`, `D`, `R`) e não uma
+    máscara de bits.
+  - A concessão usa `on table <objeto>` (válido nas duas versões).
+  - A lista de sessões não exibe o SQL em execução (necessita de
+    `MON$STATEMENTS` com permissões extras).
