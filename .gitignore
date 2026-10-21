@@ -20,3 +20,4 @@ ibstudio/tests/uismoke
 *.o
 *.compiled
 *.lps
+.vscode
