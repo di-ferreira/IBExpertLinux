@@ -13,7 +13,7 @@ mudar de estado). O plano completo está em `00-plano-geral.md`.
 | 3 | [Editor de tabela](fase-03-editor-tabela.md) | concluída | 2026-10-20 | 2026-10-20 | `9fdf618` |
 | 4 | [Editores de código](fase-04-editores-codigo.md) | concluída | 2026-10-20 | 2026-10-20 | `9d39873` |
 | 5 | [Administração](fase-05-administracao.md) | concluída | 2026-10-20 | 2026-10-20 | `bec0f65` |
-| 6 | [Extração/comparador](fase-06-extracao-comparador.md) | pendente | — | — | — |
+| 6 | [Extração/comparador](fase-06-extracao-comparador.md) | concluída | 2026-10-21 | 2026-10-21 | `e6c8725` |
 | 7 | [Assistente do editor](fase-07-assistente-editor.md) | pendente | — | — | — |
 | 8 | [Usuários/grants](fase-08-usuarios-grants.md) | pendente | — | — | — |
 
@@ -220,8 +220,40 @@ feito. Se algo ficar para depois, registrar como pendência da fase seguinte.
   - Sem botão *Cancelar* durante a execução (o processo roda até o fim).
 
 ### Fase 6 — Extração e comparador
-- Status: pendente
-- Observações: —
+- Status: concluída (2026-10-21, commit `e6c8725`)
+- Entregue:
+  - `src/core/ibschema.pas`: modelo do esquema (tabelas, domínios, views,
+    procedures, triggers, exceptions, geradores e grants).
+  - `src/core/ibextract.pas`: `TExtractOptions`, `ExtractObjects` (um objeto por
+    vez, na ordem de dependência), `ExtractScript` (script completo, com
+    `COMMIT WORK` periódico opcional) e `SaveExtractFiles` (arquivo único ou
+    um arquivo por objeto).
+  - `src/core/ibcompare.pas`: `CompareSchemas` (tabelas, colunas, índices,
+    chaves estrangeiras, views e procedures) e `BuildSyncScript` (script de
+    sincronização em um dos dois sentidos).
+  - `src/core/ibsession.pas`: `LoadSchemaModel` lê o esquema completo do
+    catálogo.
+  - `src/ui/uExtract.pas` e `src/ui/uCompare.pas`: diálogos de extração
+    (opções, prévia e salvamento) e de comparação (segunda conexão, lista de
+    diferenças, direção e prévia do script de sincronização).
+  - `src/ui/uMain.pas`: menu *Ferramentas > Extrair metadados…* e
+    *Comparar esquemas…*.
+- Testes: `tc_extract.pas` (4 casos) e `tc_compare.pas` (4 casos; núcleo = 85),
+  bloco `extracao de metadados` no `testfb.lpr` (o script do banco real traz
+  tabela, procedure e trigger com o evento) e no `uismoke.lpr` (o diálogo gera
+  o script).
+- Verificação: `make check`, `make test` (85/85), `make testfb` e `make
+  uismoke` verdes.
+- Observações/desvios (Firebird 2.5):
+  - A coluna da mensagem da exception é `rdb$message` no 2.5 e
+    `rdb$exception_message` no 3.0; o leitor tenta as duas.
+  - O gerador não tem valor no catálogo no 2.5: o valor é lido com `gen_id`
+    e recriado com `create sequence` + `set generator`.
+  - Os privilégios são letras (`S`, `I`, `U`, `D`, `R`) no 2.5 e máscara de
+    bits no 3.0.
+  - As views não têm texto no 2.5: entram no modelo sem comando de criação.
+  - Os domínios são descobertos pelos campos usados como tipo que não são
+    colunas de nenhuma tabela (no 2.5 não existe `rdb$types`).
 
 ### Fase 7 — Assistente do editor
 - Status: pendente
