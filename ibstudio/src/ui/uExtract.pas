@@ -125,6 +125,14 @@ begin
   FChkOneFile.Top := 40;
   FChkOneFile.Caption := 'Um arquivo por objeto';
 
+  FChkDescriptions.Checked := True;
+  FChkGenerators.Checked := True;
+  FChkIndexes.Checked := True;
+  FChkForeignKeys.Checked := True;
+  FChkViews.Checked := True;
+  FChkProcedures.Checked := True;
+  FChkTriggers.Checked := True;
+
   FStatus := TLabel.Create(Self);
   FStatus.Parent := Self;
   FStatus.Left := 16;

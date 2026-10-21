@@ -1410,7 +1410,10 @@ begin
   Names := ReadNames(
     'select distinct trim(rf.rdb$field_source) as nome ' +
     'from rdb$relation_fields rf ' +
-    'where not exists (select 1 from rdb$relation_fields rf2 ' +
+    'join rdb$fields f on f.rdb$field_name = rf.rdb$field_source ' +
+    'where coalesce(f.rdb$system_flag, 0) = 0 ' +
+    'and upper(rf.rdb$field_source) not like ''RDB$%'' ' +
+    'and not exists (select 1 from rdb$relation_fields rf2 ' +
     '  where rf2.rdb$field_name = rf.rdb$field_source)');
   try
     Count := 0;
